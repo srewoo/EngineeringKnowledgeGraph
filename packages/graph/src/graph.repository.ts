@@ -286,6 +286,11 @@ export class GraphRepository {
         'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.vendor)',
         'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.ref)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.mountPath)',
+        // Phase 1.6 follow-ups — Vault namespace indexes
+        'CREATE INDEX IF NOT EXISTS FOR (n:Vault) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Vault) ON (n.mountPath)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Vault) ON (n.vendor)',
       ];
       for (const query of indexes) {
         await session.run(query);

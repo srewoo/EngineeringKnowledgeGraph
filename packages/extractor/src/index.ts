@@ -31,6 +31,14 @@ export { CiVarsExtractor } from './ci.vars.extractor.js';
 export type { CiVarsExtractionResult } from './ci.vars.extractor.js';
 export { AppConfigExtractor } from './app.config.extractor.js';
 export type { AppConfigExtractionResult } from './app.config.extractor.js';
+export { EnvReadResolver, MAX_READS_CONFIG_EDGES } from './env.read.resolver.js';
+export type {
+  EnvReadInput,
+  EnvReadResolverInput,
+  EnvReadResolverResult,
+} from './env.read.resolver.js';
+export { VaultPathParser, vaultNodeId } from './vault.path.parser.js';
+export type { ParsedVaultPath } from './vault.path.parser.js';
 export type {
   HttpCallInput,
   ApiCandidate,

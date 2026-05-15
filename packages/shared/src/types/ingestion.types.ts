@@ -197,6 +197,31 @@ export interface ParsedHttpCallSite {
 }
 
 /**
+ * Source-side env-var read site (Phase 1.6 follow-ups).
+ *
+ * Captured by both the TS/JS AST parser and the multi-language regex
+ * tables. The downstream `EnvReadResolver` matches `key` against
+ * `ConfigKey.key` to emit `Function|Method -[READS_CONFIG]-> ConfigKey`
+ * edges.
+ *
+ *   - `key`               : the env-var name (e.g. `DATABASE_URL`).
+ *   - `callerSymbolId`    : enclosing function/method symbol id, when known.
+ *   - `sourceLine`        : 1-based line of the read site.
+ *   - `confidence`        : HIGH for literal access, MEDIUM for resolved
+ *                           same-file const indirection.
+ *   - `kind`              : `'env'` for `process.env` / `os.getenv` style
+ *                           reads; `'system-property'` for Java
+ *                           `System.getProperty(...)`.
+ */
+export interface ParsedEnvRead {
+  readonly key: string;
+  readonly callerSymbolId?: string;
+  readonly sourceLine: number;
+  readonly confidence: 'HIGH' | 'MEDIUM';
+  readonly kind: 'env' | 'system-property';
+}
+
+/**
  * Complete parse result for a single file.
  */
 export interface ParseResult {
@@ -215,4 +240,6 @@ export interface ParseResult {
   readonly kafka?: ParsedKafka;
   /** Rich HTTP call sites for cross-service URL→API resolution (Phase 1.5 follow-ups). */
   readonly httpCallSites?: readonly ParsedHttpCallSite[];
+  /** Env-var read sites captured at source-code level (Phase 1.6 follow-ups). */
+  readonly parsedEnvReads?: readonly ParsedEnvRead[];
 }

@@ -17,7 +17,7 @@ export const NODE_LABELS: readonly NodeLabel[] = [
   'Table', 'Column', 'Migration',
   'Function', 'Class', 'Method', 'TypeDef',
   'Commit',
-  'ConfigKey', 'SecretRef',
+  'ConfigKey', 'SecretRef', 'Vault',
 ] as const;
 
 // -- Relationship Types --

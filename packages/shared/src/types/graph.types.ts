@@ -44,7 +44,8 @@ export type NodeLabel =
   | 'TypeDef'
   | 'Commit'
   | 'ConfigKey'
-  | 'SecretRef';
+  | 'SecretRef'
+  | 'Vault';
 
 // -- Relationship Types --
 
@@ -386,6 +387,28 @@ export interface SecretRefNode extends GraphNode {
     repoUrl: string;
     filePath: string;
     sourceLine: number;
+    /**
+     * Vault-style namespace lifted from `ref` by `vault.path.parser`. Set
+     * post-emission so existing extractors do not need to compute it.
+     * Examples: `secret/data/users`, ARN sans trailing `:<key>`.
+     */
+    mountPath?: string;
+  }>;
+}
+
+/**
+ * Vault namespace node — clusters multiple `SecretRef`s sharing a mount path
+ * (e.g. `vault:secret/data/users#api_key` and `vault:secret/data/users#refresh_token`).
+ *
+ * Emitted post-extraction by the pipeline; one Vault per (vendor, mountPath).
+ * Edge: `Vault -[CONTAINS]-> SecretRef`.
+ */
+export interface VaultNode extends GraphNode {
+  readonly label: 'Vault';
+  readonly properties: Readonly<{
+    mountPath: string;
+    vendor: SecretVendor;
+    repoUrl: string;
   }>;
 }
 

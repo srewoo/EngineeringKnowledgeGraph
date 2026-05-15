@@ -32,6 +32,7 @@ import type {
   ParsedKafka,
   ParsedKafkaTopicRef,
   ParsedHttpCallSite,
+  ParsedEnvRead,
 } from '@ekg/shared';
 
 export type SupportedLanguage =
@@ -90,6 +91,7 @@ export class MultiLanguageParser {
     const envVars = this.extractEnvVars(content, lang);
     const kafka = this.extractKafka(content, lang);
     const httpCallSites = this.extractHttpCallSites(content, lang);
+    const parsedEnvReads = this.extractParsedEnvReads(content, lang);
 
     return {
       filePath,
@@ -102,7 +104,35 @@ export class MultiLanguageParser {
       loc: countLines(content),
       kafka,
       httpCallSites,
+      parsedEnvReads,
     };
+  }
+
+  // -- Env-var read sites with line numbers (Phase 1.6 follow-ups) ----------
+
+  private extractParsedEnvReads(src: string, lang: SupportedLanguage): readonly ParsedEnvRead[] {
+    const out: ParsedEnvRead[] = [];
+    const seen = new Set<string>();
+    const lineIndex = buildLineIndex(src);
+    for (const { re, kind } of ENV_READ_PATTERNS[lang] ?? []) {
+      const r = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+      let m: RegExpExecArray | null;
+      while ((m = r.exec(src)) !== null) {
+        const key = m[1];
+        if (!key) continue;
+        // Env vars: SCREAMING_SNAKE only. System properties: dotted lower/Pascal allowed.
+        const validEnv = /^[A-Z_][A-Z0-9_]*$/.test(key);
+        const validProp = /^[A-Za-z_][\w.]*$/.test(key);
+        if (kind === 'env' && !validEnv) continue;
+        if (kind === 'system-property' && !validProp) continue;
+        const sourceLine = offsetToLine(lineIndex, m.index);
+        const dedupKey = `${key}|${sourceLine}`;
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
+        out.push({ key, sourceLine, confidence: 'HIGH', kind });
+      }
+    }
+    return out;
   }
 
   // -- Kafka producer/consumer (Phase 1.5 follow-ups) ------------------------
@@ -551,5 +581,62 @@ const ENV_PATTERNS: Readonly<Record<SupportedLanguage, readonly RegExp[]>> = {
   ],
   cpp: [
     /getenv\s*\(\s*"([A-Z_][A-Z0-9_]*)"\s*\)/g,
+  ],
+};
+
+// ---- Env-read regex tables (Phase 1.6 follow-ups) -------------------------
+
+/**
+ * Source-side env-var reads, with `kind` distinguishing system properties
+ * from process-env. The same regex set powers `extractEnvVars` (which
+ * dedupes to `string[]`) so we keep semantics aligned.
+ *
+ * `key` capture group must accept `A.B.C` for Java `@Value("${spring.datasource.url}")`
+ * style references — that's why the pattern allows dots.
+ */
+const ENV_READ_PATTERNS: Readonly<Record<SupportedLanguage, readonly { re: RegExp; kind: 'env' | 'system-property' }[]>> = {
+  java: [
+    { re: /System\.getenv\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+    { re: /System\.getProperty\s*\(\s*["']([A-Za-z_][\w.]*)["']\s*\)/g, kind: 'system-property' },
+    { re: /@Value\s*\(\s*["']\$\{([A-Za-z_][\w.]*)\}/g, kind: 'system-property' },
+  ],
+  kotlin: [
+    { re: /System\.getenv\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+    { re: /\bgetenv\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+    { re: /System\.getProperty\s*\(\s*["']([A-Za-z_][\w.]*)["']\s*\)/g, kind: 'system-property' },
+  ],
+  scala: [
+    { re: /sys\.env\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+    { re: /sys\.env\.get\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+  ],
+  go: [
+    { re: /os\.Getenv\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+    { re: /os\.LookupEnv\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']\s*\)/g, kind: 'env' },
+  ],
+  python: [
+    { re: /os\.environ\s*\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\]/g, kind: 'env' },
+    { re: /os\.environ\.get\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']/g, kind: 'env' },
+    { re: /os\.getenv\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']/g, kind: 'env' },
+  ],
+  rust: [
+    { re: /std::env::var\s*\(\s*"([A-Z_][A-Z0-9_]*)"\s*\)/g, kind: 'env' },
+    { re: /env!\s*\(\s*"([A-Z_][A-Z0-9_]*)"\s*\)/g, kind: 'env' },
+  ],
+  ruby: [
+    { re: /ENV\s*\[\s*["']([A-Z_][A-Z0-9_]*)["']\s*\]/g, kind: 'env' },
+    { re: /ENV\.fetch\s*\(\s*["']([A-Z_][A-Z0-9_]*)["']/g, kind: 'env' },
+  ],
+  php: [
+    { re: /getenv\s*\(\s*['"]([A-Z_][A-Z0-9_]*)['"]/g, kind: 'env' },
+    { re: /\$_ENV\s*\[\s*['"]([A-Z_][A-Z0-9_]*)['"]/g, kind: 'env' },
+  ],
+  csharp: [
+    { re: /Environment\.GetEnvironmentVariable\s*\(\s*"([A-Z_][A-Z0-9_]*)"\s*\)/g, kind: 'env' },
+  ],
+  c: [
+    { re: /getenv\s*\(\s*"([A-Z_][A-Z0-9_]*)"\s*\)/g, kind: 'env' },
+  ],
+  cpp: [
+    { re: /getenv\s*\(\s*"([A-Z_][A-Z0-9_]*)"\s*\)/g, kind: 'env' },
   ],
 };

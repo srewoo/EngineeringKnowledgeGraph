@@ -17,6 +17,7 @@ import { createLogger } from '@ekg/shared';
 import { TypeScriptSymbolsParser } from './typescript.symbols.parser.js';
 import { KafkaTypeScriptExtractor } from './kafka.ts.parser.js';
 import { HttpClientTypeScriptExtractor } from './http.client.ts.parser.js';
+import { EnvReadParser } from './env.read.parser.js';
 import {
   DATABASE_SDK_MAP,
   HTTP_CLIENT_PACKAGES,
@@ -31,6 +32,7 @@ import type {
   ParsedDatabaseUsage,
   ParsedKafka,
   ParsedHttpCallSite,
+  ParsedEnvRead,
   Logger,
 } from '@ekg/shared';
 
@@ -40,6 +42,7 @@ export class TypeScriptParser {
   private readonly symbolsParser: TypeScriptSymbolsParser;
   private readonly kafkaExtractor: KafkaTypeScriptExtractor;
   private readonly httpExtractor: HttpClientTypeScriptExtractor;
+  private readonly envReadParser: EnvReadParser;
 
   constructor() {
     this.logger = createLogger({ service: 'typescript-parser' });
@@ -55,6 +58,7 @@ export class TypeScriptParser {
     this.symbolsParser = new TypeScriptSymbolsParser();
     this.kafkaExtractor = new KafkaTypeScriptExtractor();
     this.httpExtractor = new HttpClientTypeScriptExtractor();
+    this.envReadParser = new EnvReadParser();
   }
 
   /**
@@ -82,6 +86,7 @@ export class TypeScriptParser {
       // Phase 1.5 follow-ups — Kafka topics + line-tagged HTTP call sites.
       const kafka: ParsedKafka = this.kafkaExtractor.extract(sourceFile, imports);
       const httpCallSites: readonly ParsedHttpCallSite[] = this.httpExtractor.extract(sourceFile, imports, filePath);
+      const parsedEnvReads: readonly ParsedEnvRead[] = this.envReadParser.extract(sourceFile, filePath);
 
       this.logger.debug({
         filePath,
@@ -103,7 +108,7 @@ export class TypeScriptParser {
       const loc = sourceFile.getFullText().split('\n').length;
       return {
         filePath, imports, exports, routes, httpCalls, databaseUsages, envVars, loc, symbols,
-        kafka, httpCallSites,
+        kafka, httpCallSites, parsedEnvReads,
       };
     } finally {
       this.project.removeSourceFile(sourceFile);

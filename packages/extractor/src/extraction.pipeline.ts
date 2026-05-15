@@ -35,7 +35,10 @@ import { K8sManifestExtractor } from './k8s.manifest.extractor.js';
 import { DotenvExtractor } from './dotenv.extractor.js';
 import { CiVarsExtractor } from './ci.vars.extractor.js';
 import { AppConfigExtractor } from './app.config.extractor.js';
-import type { ConfigKeyNode, SecretRefNode } from '@ekg/shared';
+import { EnvReadResolver } from './env.read.resolver.js';
+import type { EnvReadInput } from './env.read.resolver.js';
+import { VaultPathParser, vaultNodeId } from './vault.path.parser.js';
+import type { ConfigKeyNode, SecretRefNode, ParsedEnvRead, VaultNode } from '@ekg/shared';
 
 const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -59,6 +62,8 @@ export class ExtractionPipeline {
   private readonly dotenvExtractor: DotenvExtractor;
   private readonly ciVarsExtractor: CiVarsExtractor;
   private readonly appConfigExtractor: AppConfigExtractor;
+  private readonly envReadResolver: EnvReadResolver;
+  private readonly vaultPathParser: VaultPathParser;
   private readonly logger: Logger;
 
   constructor() {
@@ -81,6 +86,8 @@ export class ExtractionPipeline {
     this.dotenvExtractor = new DotenvExtractor();
     this.ciVarsExtractor = new CiVarsExtractor();
     this.appConfigExtractor = new AppConfigExtractor();
+    this.envReadResolver = new EnvReadResolver();
+    this.vaultPathParser = new VaultPathParser();
     this.logger = createLogger({ service: 'extraction-pipeline' });
   }
 
@@ -95,6 +102,10 @@ export class ExtractionPipeline {
     const allNodes: GraphNode[] = [];
     const allRelationships: GraphRelationship[] = [];
     const allHttpCallSites: import('@ekg/shared').ExtractedHttpCallSite[] = [];
+    // Phase 1.6 follow-ups — accumulate env-var read sites across all files
+    // so the EnvReadResolver can match them against the per-repo ConfigKey
+    // set after all config extractors have run.
+    const allEnvReads: EnvReadInput[] = [];
 
     // Step 0: Repo metadata (CODEOWNERS + latest commit)
     const metadata = await this.metadataScanner.scan(repoDir);
@@ -224,6 +235,16 @@ export class ExtractionPipeline {
               isTemplate: site.isTemplate,
               ...(site.callerSymbolId ? { callerSymbolId: `${repoUrl}:${site.callerSymbolId}` } : {}),
             });
+          }
+        }
+
+        // Phase 1.6 follow-ups — capture env-var reads with the repo-prefixed
+        // caller symbol id so it matches Function/Method node ids emitted by
+        // SymbolsExtractor.
+        if (result.parsedEnvReads && result.parsedEnvReads.length > 0) {
+          for (const read of result.parsedEnvReads) {
+            const rewritten = this.rewriteEnvReadCaller(read, repoUrl);
+            allEnvReads.push({ read: rewritten, filePath: result.filePath });
           }
         }
 
@@ -376,6 +397,12 @@ export class ExtractionPipeline {
       allNodes,
       allRelationships,
     );
+
+    // Step 3.8: Phase 1.6 follow-ups — link source-code env-reads to the
+    // ConfigKey nodes emitted in 3.7, and cluster SecretRefs by Vault mount
+    // path. Both are pure passes over data already in `allNodes`.
+    this.linkEnvReadsToConfigKeys(allEnvReads, allNodes, allRelationships);
+    this.clusterSecretRefsByVault(repoUrl, allNodes, allRelationships);
 
     // Step 4: Config files for additional DB references
     const configResults = await this.configScanner.scan(repoDir);
@@ -960,6 +987,104 @@ export class ExtractionPipeline {
           },
         });
       }
+    }
+  }
+
+  /**
+   * Rewrite a parsed env-read's `callerSymbolId` to the repo-prefixed form
+   * that `SymbolsExtractor` emits. Local ids are `fn:`/`method:` — we add
+   * `${repoUrl}:` so the resolver's edge sourceId matches the Function /
+   * Method node id in Neo4j.
+   */
+  private rewriteEnvReadCaller(read: ParsedEnvRead, repoUrl: string): ParsedEnvRead {
+    const id = read.callerSymbolId;
+    if (!id) return read;
+    if (id.startsWith('fn:') || id.startsWith('method:')) {
+      return { ...read, callerSymbolId: `${repoUrl}:${id}` };
+    }
+    return read;
+  }
+
+  /**
+   * Phase 1.6 follow-ups — emit `Function|Method -[READS_CONFIG]-> ConfigKey`
+   * edges by matching source-code env-reads against per-repo ConfigKeys.
+   * No-op when either list is empty. Edges hard-capped inside the resolver.
+   */
+  private linkEnvReadsToConfigKeys(
+    reads: readonly EnvReadInput[],
+    allNodes: readonly GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): void {
+    if (reads.length === 0) return;
+    const configKeys: ConfigKeyNode[] = [];
+    for (const n of allNodes) {
+      if (n.label === 'ConfigKey') configKeys.push(n as ConfigKeyNode);
+    }
+    if (configKeys.length === 0) return;
+
+    const result = this.envReadResolver.resolve({ reads, configKeys });
+    if (result.relationships.length > 0) {
+      allRelationships.push(...result.relationships);
+    }
+    this.logger.info({
+      reads: reads.length,
+      configKeys: configKeys.length,
+      resolved: result.resolvedCount,
+      unresolved: result.unresolvedCount,
+      capped: result.capped,
+    }, 'Env-read → ConfigKey resolution completed');
+  }
+
+  /**
+   * Phase 1.6 follow-ups — cluster all SecretRef nodes by their parsed
+   * mount path. Emits one `Vault` node per (vendor, mountPath) and a
+   * `Vault -[CONTAINS]-> SecretRef` edge per ref. Also stamps the parsed
+   * `mountPath` onto the SecretRef's properties for direct query.
+   */
+  private clusterSecretRefsByVault(
+    repoUrl: string,
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): void {
+    const vaultIds = new Set<string>();
+    let clustered = 0;
+
+    for (const n of allNodes) {
+      if (n.label !== 'SecretRef') continue;
+      const sr = n as SecretRefNode;
+      const parsed = this.vaultPathParser.parse(sr.properties.ref, sr.properties.vendor);
+      if (!parsed.mountPath) continue;
+
+      // Stamp mountPath on the SecretRef for direct lookup.
+      (sr.properties as Record<string, unknown>)['mountPath'] = parsed.mountPath;
+
+      const id = vaultNodeId(parsed.vendor, parsed.mountPath);
+      if (!vaultIds.has(id)) {
+        vaultIds.add(id);
+        const vault: VaultNode = {
+          id,
+          label: 'Vault',
+          name: parsed.mountPath,
+          properties: {
+            mountPath: parsed.mountPath,
+            vendor: parsed.vendor,
+            repoUrl,
+          },
+        };
+        allNodes.push(vault);
+      }
+      allRelationships.push({
+        type: 'CONTAINS',
+        sourceId: id,
+        targetId: sr.id,
+        confidence: 'HIGH',
+        properties: { source: 'vault-path-parser' },
+      });
+      clustered++;
+    }
+
+    if (clustered > 0) {
+      this.logger.info({ vaults: vaultIds.size, secretRefs: clustered }, 'Vault clustering completed');
     }
   }
 
