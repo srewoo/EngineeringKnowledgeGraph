@@ -33,17 +33,25 @@
     {
       "id": "atlassian",
       "enabled": false,
-      "transport": "stdio",
-      "env": { "ATLASSIAN_TOKEN": "${ATLASSIAN_TOKEN}" },
+      "transport": "http",
+      "env": {
+        "ATLASSIAN_BASE_URL": "${ATLASSIAN_BASE_URL}",
+        "ATLASSIAN_EMAIL": "${ATLASSIAN_EMAIL}",
+        "ATLASSIAN_API_TOKEN": "${ATLASSIAN_API_TOKEN}"
+      },
       "serviceMapping": "auto",
-      "capabilities": ["docs", "tickets"],
+      "capabilities": ["tickets", "docs"],
       "priority": 5
     },
     {
       "id": "mixpanel",
       "enabled": false,
-      "transport": "stdio",
-      "env": { "MIXPANEL_TOKEN": "${MIXPANEL_TOKEN}" },
+      "transport": "http",
+      "env": {
+        "MIXPANEL_PROJECT_ID": "${MIXPANEL_PROJECT_ID}",
+        "MIXPANEL_SERVICE_ACCOUNT": "${MIXPANEL_SERVICE_ACCOUNT}",
+        "MIXPANEL_API_SECRET": "${MIXPANEL_API_SECRET}"
+      },
       "serviceMapping": "auto",
       "capabilities": ["usage"],
       "priority": 5
@@ -52,9 +60,13 @@
       "id": "loki",
       "enabled": false,
       "transport": "http",
-      "env": { "LOKI_URL": "${LOKI_URL}" },
-      "serviceMapping": { "field": "app", "pattern": "{service}" },
-      "capabilities": ["logs"],
+      "env": {
+        "LOKI_BASE_URL": "${LOKI_BASE_URL}",
+        "LOKI_TENANT_ID": "${LOKI_TENANT_ID}",
+        "LOKI_TOKEN": "${LOKI_TOKEN}"
+      },
+      "serviceMapping": { "field": "service_name", "pattern": "{service}" },
+      "capabilities": ["logs", "errors"],
       "priority": 5
     }
   ]
