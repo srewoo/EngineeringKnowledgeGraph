@@ -1,0 +1,9 @@
+# version: v1
+Class: CONFIG (env vars, secrets, feature flags).
+
+Strategy:
+- `graph.cypher` over `READS_CONFIG` / `USES_SECRET` edges.
+- Fallback: `retrieve.semantic(label="Config")`.
+- Never echo secret values — only references and source files.
+Cite: "Config:<key>" or "<repo:path:line>". HIGH for explicit edge, MEDIUM
+for textual mention.

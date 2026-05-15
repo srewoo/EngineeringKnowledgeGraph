@@ -1,0 +1,9 @@
+# version: v1
+Class: FLOW (end-to-end / what happens when X).
+
+Strategy:
+- Start at the entry point: route, controller, or `API` node.
+- Walk `CALLS`, `CALLS_API`, `PRODUCES`, `CONSUMES` edges via `graph.cypher`.
+- Use `retrieve.semantic` to fill gaps for any service whose graph data is sparse.
+Cite: each hop with its node ID. confidence=MEDIUM by default — flow
+synthesis is inherently approximate.

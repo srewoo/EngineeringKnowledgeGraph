@@ -1,0 +1,9 @@
+# version: v1
+Class: OWNERSHIP (who owns / maintains / which team).
+
+Strategy:
+- `graph.cypher` over `OWNS` / `MAINTAINS` edges from `Service`/`Repo` to
+  `Owner`/`Team`.
+- If CODEOWNERS coverage is missing, say so explicitly — don't guess.
+Cite: "Owner:<id>" or "Team:<id>". HIGH if explicit CODEOWNERS hit, LOW if
+inferred from commit history alone.

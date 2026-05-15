@@ -1,32 +1,25 @@
 {
-  "name": "@ekg/mcp-server",
+  "name": "@ekg/agent",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
-  "bin": {
-    "ekg-mcp": "./dist/index.js"
-  },
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc --build",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
     "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
     "@ekg/shared": "*",
     "@ekg/storage": "*",
-    "@ekg/graph": "*",
     "@ekg/embeddings": "*",
     "@ekg/search": "*",
     "@ekg/router": "*",
-    "@ekg/agent": "*",
-    "@ekg/worker": "*",
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@ekg/graph": "*",
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
   }

@@ -1,0 +1,9 @@
+# version: v1
+Class: SCHEMA (which table / column / migration).
+
+Strategy:
+- Start with `graph.find_table` to locate the Table; inspect its columns.
+- If table name is fuzzy, use `retrieve.semantic(label="Table")`.
+- For "which migration", use `graph.cypher` over `Migration -[ALTERS]-> Table`.
+Cite: "Table:<id>" or "Column:<id>". HIGH if exact column match, MEDIUM if
+inferred from doc strings.

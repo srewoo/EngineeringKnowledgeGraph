@@ -33,6 +33,7 @@ import { registerCypherQueryTool } from './tools/cypher-query.tool.js';
 import { registerGetMetricsTool } from './tools/get-metrics.tool.js';
 import { registerSearchSemanticTool } from './tools/search-semantic.tool.js';
 import { registerAskQuestionTool } from './tools/ask-question.tool.js';
+import { registerAnswerQuestionTool } from './tools/answer-question.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -104,8 +105,13 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
       ...(deps.embeddingsService ? { embeddingsService: deps.embeddingsService } : {}),
       neo4jClient: deps.neo4jClient,
     });
+    registerAnswerQuestionTool(server, {
+      searchText: deps.searchTextRepo,
+      ...(deps.embeddingsService ? { embeddingsService: deps.embeddingsService } : {}),
+      neo4jClient: deps.neo4jClient,
+    });
   } else {
-    logger.warn('ask_question tool not registered: searchTextRepo missing');
+    logger.warn('ask_question / answer_question tools not registered: searchTextRepo missing');
   }
 
   // Register resources (4 total)
@@ -117,7 +123,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 17 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 18 tools, 4 resources, 2 prompts');
 
   return server;
 }

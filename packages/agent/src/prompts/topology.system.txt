@@ -1,0 +1,9 @@
+# version: v1
+Class: TOPOLOGY (services depend on / use / consume X).
+
+Strategy:
+- Prefer `graph.cypher` with parameterised queries over the `Service` /
+  `Repo` / `DEPENDS_ON` / `CALLS_API` topology.
+- Use `retrieve.semantic` only if a service name is fuzzy.
+Cite: graph node IDs (e.g. "Service:person-service"). confidence=HIGH for
+direct DEPENDS_ON / CALLS edges.

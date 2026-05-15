@@ -1,0 +1,102 @@
+{
+  "topology": {
+    "question": "What services depend on person-service?",
+    "answer": {
+      "answer": "person-service is depended on by 3 services: coaching-service, learner-service, and analytics-service (all via DEPENDS_ON edges).",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "graph", "ref": "Service:person-service", "excerpt": "DEPENDS_ON edges from coaching-service, learner-service, analytics-service" }
+      ]
+    }
+  },
+  "schema": {
+    "question": "Which column marks a person internal vs external?",
+    "answer": {
+      "answer": "The Person table has an `is_internal` boolean column that distinguishes internal from external users.",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "table", "ref": "Table:person.Person", "excerpt": "is_internal BOOLEAN NOT NULL DEFAULT false" }
+      ]
+    }
+  },
+  "code": {
+    "question": "Where do we calculate proficiency score?",
+    "answer": {
+      "answer": "Proficiency score is calculated in `calculateProficiencyScore` in apps/scoring/src/proficiency.ts (lines 42-87). It weights recent attempts higher than old ones and clamps to [0,100].",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "code", "ref": "scoring:apps/scoring/src/proficiency.ts:42-87" }
+      ]
+    }
+  },
+  "flow": {
+    "question": "What happens when a learner starts a course?",
+    "answer": {
+      "answer": "Frontend POSTs to /api/courses/:id/start → course-service creates an Enrollment, emits course.enrollment.created on Kafka → notification-service sends email, analytics-service records the start event.",
+      "confidence": "MEDIUM",
+      "citations": [
+        { "kind": "api", "ref": "API:course-service.POST./api/courses/:id/start" },
+        { "kind": "graph", "ref": "MessageQueue:course.enrollment.created" }
+      ]
+    }
+  },
+  "ownership": {
+    "question": "Who owns the AI prompt store?",
+    "answer": {
+      "answer": "The AI prompt store (prompt-store-service) is owned by team `ai-platform` per CODEOWNERS.",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "graph", "ref": "Team:ai-platform", "excerpt": "CODEOWNERS: /apps/prompt-store @ai-platform" }
+      ]
+    }
+  },
+  "api": {
+    "question": "Which endpoint creates a coaching session?",
+    "answer": {
+      "answer": "POST /api/v1/coaching/sessions on coaching-service. Handler: CoachingController.create.",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "api", "ref": "API:coaching-service.POST./api/v1/coaching/sessions" }
+      ]
+    }
+  },
+  "config": {
+    "question": "Which env var controls Snowflake credentials?",
+    "answer": {
+      "answer": "SNOWFLAKE_PASSWORD plus SNOWFLAKE_USER and SNOWFLAKE_ACCOUNT, read by analytics-service in src/config/snowflake.ts.",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "code", "ref": "analytics:src/config/snowflake.ts:1-30" }
+      ]
+    }
+  },
+  "ops": {
+    "question": "Which Kafka topics does callAI consume?",
+    "answer": {
+      "answer": "callAI consumes 2 topics: call.transcript.completed and call.summary.requested.",
+      "confidence": "HIGH",
+      "citations": [
+        { "kind": "graph", "ref": "MessageQueue:call.transcript.completed" },
+        { "kind": "graph", "ref": "MessageQueue:call.summary.requested" }
+      ]
+    }
+  },
+  "history": {
+    "question": "When did we add internal/external classification?",
+    "answer": {
+      "answer": "git blame shows the is_internal column was added in commit a1b2c3d on 2024-08-12 by alice@mindtickle.",
+      "confidence": "MEDIUM",
+      "citations": [
+        { "kind": "code", "ref": "person:src/models/person.ts:42:42", "excerpt": "a1b2c3d 2024-08-12 alice" }
+      ]
+    }
+  },
+  "unknown": {
+    "question": "Tell me about the system.",
+    "answer": {
+      "answer": "Insufficient evidence — refusing to guess.",
+      "confidence": "LOW",
+      "citations": []
+    }
+  }
+}

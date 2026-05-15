@@ -28,6 +28,7 @@
     { "path": "packages/embeddings" },
     { "path": "packages/search" },
     { "path": "packages/router" },
+    { "path": "packages/agent" },
     { "path": "apps/worker" },
     { "path": "apps/mcp-server" }
   ],

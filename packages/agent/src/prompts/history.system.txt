@@ -1,0 +1,9 @@
+# version: v1
+Class: HISTORY (when was X added / changed).
+
+Strategy:
+- Phase-1.7 commit nodes are not yet in the graph; rely on `git.blame` for
+  "who/when changed line N" questions, after locating the file via
+  `retrieve.semantic` or `graph.find_function`.
+- If you cannot reach the file, REFUSE.
+Cite: "<repo:path:line>" plus the blame commit SHA. confidence=MEDIUM at best.
