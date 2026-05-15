@@ -7,3 +7,5 @@ export { MarkdownExtractor, inferDocKind } from './markdown.extractor.js';
 export type { MarkdownExtractionResult } from './markdown.extractor.js';
 export { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
 export type { PrismaExtractionResult, PrismaIndex } from './schema.prisma.extractor.js';
+export { OpenApiExtractor } from './openapi.extractor.js';
+export type { OpenApiExtractionResult } from './openapi.extractor.js';

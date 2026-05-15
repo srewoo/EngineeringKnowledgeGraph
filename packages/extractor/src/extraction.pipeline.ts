@@ -23,6 +23,7 @@ import { ImportExtractor } from './import.extractor.js';
 import { ServiceDetector } from './service.detector.js';
 import { MarkdownExtractor } from './markdown.extractor.js';
 import { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
+import { OpenApiExtractor } from './openapi.extractor.js';
 
 const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -37,6 +38,7 @@ export class ExtractionPipeline {
   private readonly serviceDetector: ServiceDetector;
   private readonly markdownExtractor: MarkdownExtractor;
   private readonly prismaExtractor: SchemaPrismaExtractor;
+  private readonly openApiExtractor: OpenApiExtractor;
   private readonly logger: Logger;
 
   constructor() {
@@ -50,6 +52,7 @@ export class ExtractionPipeline {
     this.serviceDetector = new ServiceDetector();
     this.markdownExtractor = new MarkdownExtractor();
     this.prismaExtractor = new SchemaPrismaExtractor();
+    this.openApiExtractor = new OpenApiExtractor();
     this.logger = createLogger({ service: 'extraction-pipeline' });
   }
 
@@ -203,9 +206,27 @@ export class ExtractionPipeline {
 
     // Step 3.5: API schema files (OpenAPI / proto / GraphQL)
     const schemaResults = await this.schemaScanner.scan(repoDir);
+    const handledSpecPaths = new Set<string>();
     for (const sch of schemaResults) {
       // Resolve which service owns this schema by directory prefix
       const relPath = sch.filePath.startsWith(repoDir) ? sch.filePath.slice(repoDir.length + 1) : sch.filePath;
+
+      // OpenAPI files get a richer extraction (operationId, schemas, tags, etc.)
+      // via OpenApiExtractor — falling back to the scanner's basic routes if
+      // the deep extractor produces nothing.
+      if (sch.framework === 'openapi') {
+        const enriched = await this.handleOpenApiSpec(
+          sch.filePath,
+          relPath,
+          repoUrl,
+          servicesByDirLen,
+          allNodes,
+          allRelationships,
+        );
+        handledSpecPaths.add(sch.filePath);
+        if (enriched > 0) continue;
+      }
+
       const owningService = this.findServiceForFile(relPath, servicesByDirLen);
       for (const route of sch.routes) {
         const apiId = `api:${route.method}:${route.path}`;
@@ -231,6 +252,19 @@ export class ExtractionPipeline {
         }
       }
     }
+
+    // Step 3.6: Content-sniff JSON/YAML files for OpenAPI/Swagger specs that
+    // the filename-based scanner missed. Bounded to the file list we already
+    // walked — no extra disk traversal.
+    await this.sniffOpenApiSpecs(
+      files,
+      repoDir,
+      repoUrl,
+      servicesByDirLen,
+      handledSpecPaths,
+      allNodes,
+      allRelationships,
+    );
 
     // Step 4: Config files for additional DB references
     const configResults = await this.configScanner.scan(repoDir);
@@ -465,6 +499,90 @@ export class ExtractionPipeline {
           properties: { source: 'prisma-extractor' },
         });
       }
+    }
+  }
+
+  /**
+   * Read an OpenAPI/Swagger spec, run OpenApiExtractor, emit rich API nodes
+   * plus Service -[EXPOSES]-> API edges. Returns the number of API nodes
+   * produced (0 ⇒ caller should fall back to the basic scanner output).
+   */
+  private async handleOpenApiSpec(
+    absolutePath: string,
+    relativePath: string,
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<number> {
+    let content: string;
+    try {
+      content = await readFile(absolutePath, 'utf8');
+    } catch (err) {
+      this.logger.warn(
+        { err, path: relativePath },
+        'Failed to read OpenAPI spec; skipping',
+      );
+      return 0;
+    }
+
+    const { apis } = this.openApiExtractor.extract(content, relativePath, repoUrl);
+    if (apis.length === 0) return 0;
+
+    const owningService = this.findServiceForFile(relativePath, servicesByDirLen);
+    for (const api of apis) {
+      allNodes.push(api);
+      if (owningService) {
+        allRelationships.push({
+          type: 'EXPOSES',
+          sourceId: `service:${owningService.name}`,
+          targetId: api.id,
+          confidence: 'HIGH',
+          properties: { source: 'openapi-extractor', specPath: relativePath },
+        });
+      }
+    }
+    return apis.length;
+  }
+
+  /**
+   * Walk the already-scanned file list and content-sniff any `.json/.yaml/.yml`
+   * file whose filename didn't match the OpenAPI/Swagger naming convention.
+   * Skips files already handled by `handleOpenApiSpec`.
+   */
+  private async sniffOpenApiSpecs(
+    files: readonly { absolutePath: string; relativePath: string }[],
+    _repoDir: string,
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    handledAbsPaths: ReadonlySet<string>,
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    for (const file of files) {
+      if (handledAbsPaths.has(file.absolutePath)) continue;
+      if (!OpenApiExtractor.isSniffable(file.relativePath)) continue;
+      // If the filename already routed via the scanner, skip — we either
+      // already handled it or it's not a spec.
+      if (OpenApiExtractor.handlesByPath(file.relativePath)) continue;
+
+      let content: string;
+      try {
+        content = await readFile(file.absolutePath, 'utf8');
+      } catch {
+        continue;
+      }
+      const sniffed = OpenApiExtractor.sniff(content);
+      if (!sniffed) continue;
+
+      await this.handleOpenApiSpec(
+        file.absolutePath,
+        file.relativePath,
+        repoUrl,
+        servicesByDirLen,
+        allNodes,
+        allRelationships,
+      );
     }
   }
 

@@ -102,12 +102,24 @@ export interface DatabaseNode extends GraphNode {
   }>;
 }
 
+export type ApiSpecVersion = 'openapi-3' | 'swagger-2';
+
 export interface ApiNode extends GraphNode {
   readonly label: 'API';
   readonly properties: Readonly<{
     method: string;
     path: string;
     framework: string;
+    // -- OpenAPI / Swagger enrichment (Phase 1.5). All optional so existing
+    // API nodes emitted by regex/AST extractors remain valid. --
+    operationId?: string;
+    summary?: string;
+    description?: string;
+    requestSchema?: unknown;
+    responseSchemas?: Readonly<Record<string, unknown>>;
+    tags?: readonly string[];
+    specVersion?: ApiSpecVersion;
+    specPath?: string;
   }>;
 }
 

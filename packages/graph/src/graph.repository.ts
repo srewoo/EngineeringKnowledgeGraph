@@ -193,6 +193,8 @@ export class GraphRepository {
         'CREATE INDEX IF NOT EXISTS FOR (n:Database) ON (n.name)',
         'CREATE INDEX IF NOT EXISTS FOR (n:API) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:API) ON (n.path)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:API) ON (n.specPath)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:API) ON (n.operationId)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Config) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Repo) ON (n.url)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Owner) ON (n.id)',

@@ -144,6 +144,25 @@ export const migrationNodeSchema = z.object({
   appliedAt: z.string().optional(),
 });
 
+// -- API (OpenAPI / Swagger) Node Schemas --
+
+export const apiSpecVersionSchema = z.enum(['openapi-3', 'swagger-2']);
+
+export const apiNodeSchema = z.object({
+  method: z.string().min(1),
+  path: z.string().min(1),
+  framework: z.string().min(1),
+  // Phase 1.5 enrichment — all optional.
+  operationId: z.string().optional(),
+  summary: z.string().optional(),
+  description: z.string().optional(),
+  requestSchema: z.unknown().optional(),
+  responseSchemas: z.record(z.string(), z.unknown()).optional(),
+  tags: z.array(z.string()).optional(),
+  specVersion: apiSpecVersionSchema.optional(),
+  specPath: z.string().optional(),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;
