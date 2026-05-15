@@ -161,6 +161,42 @@ export interface ParsedSymbols {
 }
 
 /**
+ * Kafka topic literal extracted from a producer or consumer call site
+ * (Phase 1.5 follow-ups).
+ *
+ * `template` carries the original template-literal form (with `${var}`
+ * placeholders) when the literal isn't a plain string. `name` is what
+ * we use as the topic node id.
+ */
+export interface ParsedKafkaTopicRef {
+  readonly name: string;
+  readonly template?: string;
+  readonly sourceLine: number;
+  readonly confidence: 'HIGH' | 'MEDIUM';
+  readonly clientLibrary?: string;
+}
+
+export interface ParsedKafka {
+  readonly producers: readonly ParsedKafkaTopicRef[];
+  readonly consumers: readonly ParsedKafkaTopicRef[];
+}
+
+/**
+ * Rich HTTP call site extracted for cross-service URL→API linking.
+ * Carries the source line and an optional caller symbol id (function/method)
+ * so the resolver can emit `Function -[CALLS_API]-> API` edges.
+ */
+export interface ParsedHttpCallSite {
+  readonly url: string;
+  readonly method: string;
+  readonly clientLibrary: string;
+  readonly sourceLine: number;
+  readonly callerSymbolId?: string;
+  /** True when the URL was a template literal containing `${var}` placeholders. */
+  readonly isTemplate: boolean;
+}
+
+/**
  * Complete parse result for a single file.
  */
 export interface ParseResult {
@@ -175,4 +211,8 @@ export interface ParseResult {
   readonly loc?: number;
   /** Symbol-level extraction (Phase 1.3). Only populated for TS/JS today. */
   readonly symbols?: ParsedSymbols;
+  /** Kafka producer/consumer topic literals (Phase 1.5 follow-ups). */
+  readonly kafka?: ParsedKafka;
+  /** Rich HTTP call sites for cross-service URL→API resolution (Phase 1.5 follow-ups). */
+  readonly httpCallSites?: readonly ParsedHttpCallSite[];
 }

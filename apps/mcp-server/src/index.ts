@@ -19,7 +19,7 @@ dotenv.config({ path: envPath });
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
-import { SqliteRepository } from '@ekg/storage';
+import { SqliteRepository, UnresolvedHttpRepository } from '@ekg/storage';
 import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService, SearchIndexService } from '@ekg/worker';
 import { bootstrapAdapters } from '@ekg/adapters';
 import { createMcpServer } from './server.js';
@@ -97,7 +97,8 @@ async function main(): Promise<void> {
   const searchTextRepo = searchIndexService.getRepository();
   logger.info({ searchIndexDbPath }, 'BM25 search index initialised');
 
-  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo, embeddingsService, searchIndexService);
+  const unresolvedHttpRepo = new UnresolvedHttpRepository(sqliteRepo.getConnection());
+  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo, embeddingsService, searchIndexService, unresolvedHttpRepo);
   const bulkService = new BulkIngestionService(ingestionService, sqliteRepo, env.ingestTimeoutMs);
   const serviceResolver = new ServiceResolver(neo4jClient);
 

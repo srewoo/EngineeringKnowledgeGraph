@@ -1,5 +1,7 @@
 export { TypeScriptParser } from './typescript.parser.js';
 export { TypeScriptSymbolsParser } from './typescript.symbols.parser.js';
+export { KafkaTypeScriptExtractor } from './kafka.ts.parser.js';
+export { HttpClientTypeScriptExtractor } from './http.client.ts.parser.js';
 export { TypeScriptParserPool } from './typescript.parser.pool.js';
 export type { PoolOptions } from './typescript.parser.pool.js';
 export { MultiLanguageParser } from './multi.language.parser.js';

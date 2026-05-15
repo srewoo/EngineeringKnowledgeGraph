@@ -11,3 +11,12 @@ export { OpenApiExtractor } from './openapi.extractor.js';
 export type { OpenApiExtractionResult } from './openapi.extractor.js';
 export { SymbolsExtractor } from './symbols.extractor.js';
 export type { SymbolsExtractionResult } from './symbols.extractor.js';
+export { UrlApiResolver } from './url.api.resolver.js';
+export type {
+  HttpCallInput,
+  ApiCandidate,
+  ResolvedApiCall,
+  UnresolvedHttpCall,
+  UrlResolverInput,
+  UrlResolverResult,
+} from './url.api.resolver.js';

@@ -258,6 +258,9 @@ export class GraphRepository {
         'CREATE INDEX IF NOT EXISTS FOR (n:Column) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Column) ON (n.tableId)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Migration) ON (n.id)',
+        // Phase 1.5 — Kafka topic indexes
+        'CREATE INDEX IF NOT EXISTS FOR (n:Topic) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Topic) ON (n.name)',
         // Phase 1.3 — function-level symbol indexes
         'CREATE INDEX IF NOT EXISTS FOR (n:Function) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Function) ON (n.repoUrl)',

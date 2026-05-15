@@ -27,6 +27,7 @@ export type NodeLabel =
   | 'Module'
   | 'Config'
   | 'MessageQueue'
+  | 'Topic'
   | 'Feature'
   | 'TestCase'
   | 'Owner'
@@ -60,7 +61,10 @@ export type RelationshipType =
   | 'ALTERS'
   | 'RELATES_TO'
   | 'DEFINES'
-  | 'EXTENDS';
+  | 'EXTENDS'
+  | 'PRODUCES'
+  | 'CONSUMES'
+  | 'CALLS_API';
 
 // -- Base Node --
 
@@ -170,6 +174,17 @@ export interface DocNode extends GraphNode {
     codeBlockCount: number;
     linkCount: number;
     format: 'markdown' | 'mdx' | 'rst' | 'adoc';
+  }>;
+}
+
+// -- Kafka Topic Node (Phase 1.5 follow-ups) --
+
+export interface TopicNode extends GraphNode {
+  readonly label: 'Topic';
+  readonly properties: Readonly<{
+    name: string;
+    /** When the literal contained `${var}` placeholders, the original template. */
+    template?: string;
   }>;
 }
 
@@ -294,9 +309,25 @@ export interface GraphRelationship {
 
 // -- Extraction Result --
 
+/**
+ * HTTP call site captured during extraction, retained on the result so the
+ * downstream URL→API resolver (Phase 1.5) can run after all APIs are known.
+ */
+export interface ExtractedHttpCallSite {
+  readonly url: string;
+  readonly method: string;
+  readonly clientLibrary: string;
+  readonly sourceLine: number;
+  readonly filePath: string;
+  readonly callerSymbolId?: string;
+  readonly isTemplate: boolean;
+}
+
 export interface ExtractionResult {
   readonly nodes: readonly GraphNode[];
   readonly relationships: readonly GraphRelationship[];
   readonly sourceFile: string;
   readonly repoUrl: string;
+  /** Phase 1.5 — populated for URL→API resolver. Empty when no HTTP calls. */
+  readonly httpCallSites?: readonly ExtractedHttpCallSite[];
 }

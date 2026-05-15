@@ -12,7 +12,7 @@ import type { NodeLabel, RelationshipType } from './types/graph.types.js';
 
 export const NODE_LABELS: readonly NodeLabel[] = [
   'Service', 'API', 'Database', 'Repo', 'File',
-  'Module', 'Config', 'MessageQueue', 'Feature', 'TestCase',
+  'Module', 'Config', 'MessageQueue', 'Topic', 'Feature', 'TestCase',
   'Owner', 'Team', 'Doc',
   'Table', 'Column', 'Migration',
   'Function', 'Class', 'Method', 'TypeDef',
@@ -26,6 +26,7 @@ export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'OWNS', 'MEMBER_OF', 'DOCUMENTED_BY',
   'HAS', 'ALTERS', 'RELATES_TO',
   'DEFINES', 'EXTENDS',
+  'PRODUCES', 'CONSUMES', 'CALLS_API',
 ] as const;
 
 /** Hard cap for cyclomatic complexity counting — prevents pathological files. */
@@ -249,6 +250,34 @@ export const API_FRAMEWORK_PACKAGES: readonly string[] = [
   // Ruby / PHP / .NET
   'rails', 'sinatra', 'laravel', 'symfony',
 ] as const;
+
+// -- Kafka Client Detection (Phase 1.5 follow-ups) --
+
+/**
+ * Library names whose presence in imports hints that a file is doing
+ * Kafka producer/consumer work. Used by the Kafka extractors as a cheap
+ * pre-filter before walking AST/regex patterns.
+ */
+export const KAFKA_CLIENT_PACKAGES: readonly string[] = [
+  // JS / TS
+  'kafkajs', '@confluentinc/kafka-javascript', 'node-rdkafka', 'kafka-node',
+  // Java / Spring
+  'org.apache.kafka', 'spring-kafka', 'org.springframework.kafka',
+  // Go
+  'github.com/segmentio/kafka-go', 'github.com/Shopify/sarama', 'sarama',
+  // Python
+  'kafka-python', 'pykafka', 'confluent-kafka', 'aiokafka',
+] as const;
+
+// -- Service Host Hints (Phase 1.5 follow-ups) --
+
+/**
+ * `ekg.config.json` field shape for cross-service URL→API resolution:
+ * `serviceHosts: { "<service-name>": ["host-1", "host-2"] }`.
+ * The resolver matches an HTTP call's URL host against these entries
+ * before falling back to fuzzy name match.
+ */
+export const SERVICE_HOST_HINT_FILE = 'ekg.config.json';
 
 // -- Graph Constraints --
 

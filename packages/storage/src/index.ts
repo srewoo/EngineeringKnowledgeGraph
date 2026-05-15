@@ -9,3 +9,5 @@ export { SnapshotRepository } from './snapshot.repository.js';
 export type { Snapshot } from './snapshot.repository.js';
 export { DlqRepository } from './dlq.repository.js';
 export type { DlqRow, DlqUpsert } from './dlq.repository.js';
+export { UnresolvedHttpRepository } from './unresolved-http.repository.js';
+export type { UnresolvedHttpRow, UnresolvedHttpUpsert } from './unresolved-http.repository.js';

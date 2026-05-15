@@ -25,6 +25,8 @@ import { ImportExtractor } from '@ekg/extractor';
 import { RepoCloner } from './repo.cloner.js';
 import { EmbeddingsService } from './embeddings.service.js';
 import { SearchIndexService } from './search-index.service.js';
+import { UrlApiLinker } from './url.api.linker.js';
+import type { UnresolvedHttpRepository } from '@ekg/storage';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -65,6 +67,7 @@ export class IngestionService {
   private readonly repoStateRepo: RepoStateRepository;
   private readonly embeddingsService?: EmbeddingsService;
   private readonly searchIndexService?: SearchIndexService;
+  private readonly urlApiLinker: UrlApiLinker;
   private readonly logger: Logger;
 
   constructor(
@@ -73,6 +76,7 @@ export class IngestionService {
     sqliteRepo: SqliteRepository,
     embeddingsService?: EmbeddingsService,
     searchIndexService?: SearchIndexService,
+    unresolvedHttpRepo?: UnresolvedHttpRepository,
   ) {
     this.cloner = new RepoCloner(dataDir);
     this.pipeline = new ExtractionPipeline();
@@ -84,6 +88,7 @@ export class IngestionService {
     this.repoStateRepo = new RepoStateRepository(sqliteRepo.getConnection());
     this.embeddingsService = embeddingsService;
     this.searchIndexService = searchIndexService;
+    this.urlApiLinker = new UrlApiLinker(neo4jClient, unresolvedHttpRepo);
     this.logger = createLogger({ service: 'ingestion-service' });
   }
 
@@ -181,7 +186,25 @@ export class IngestionService {
 
     this.sqliteRepo.updateJobStatus(jobId, 'BUILDING_GRAPH');
     const nodesCreated = await this.graphRepo.mergeNodes(extraction.nodes);
-    const edgesCreated = await this.graphRepo.mergeRelationships(extraction.relationships);
+    let edgesCreated = await this.graphRepo.mergeRelationships(extraction.relationships);
+
+    // Phase 1.5 — URL → API resolution (cross-service CALLS_API edges).
+    // Best-effort: failures don't block ingest.
+    try {
+      if (extraction.httpCallSites && extraction.httpCallSites.length > 0) {
+        const linked = await this.urlApiLinker.link({
+          repoUrl: options.repoUrl,
+          localPath,
+          nodes: extraction.nodes,
+          httpCallSites: extraction.httpCallSites,
+        });
+        if (linked.newRelationships.length > 0) {
+          edgesCreated += await this.graphRepo.mergeRelationships(linked.newRelationships);
+        }
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'URL→API linker failed (continuing)');
+    }
 
     // Best-effort BM25 indexing — always-on, local + free.
     if (this.searchIndexService) {

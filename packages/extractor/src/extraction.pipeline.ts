@@ -18,7 +18,10 @@ import {
   MultiLanguageParser,
 } from '@ekg/parser';
 import type { CodeOwnerRule } from '@ekg/parser';
-import type { GraphNode, GraphRelationship, ExtractionResult, EkgConfig, Logger } from '@ekg/shared';
+import type {
+  GraphNode, GraphRelationship, ExtractionResult, EkgConfig, Logger,
+  ParseResult, ParsedHttpCallSite, EdgeConfidence,
+} from '@ekg/shared';
 import { ImportExtractor } from './import.extractor.js';
 import { ServiceDetector } from './service.detector.js';
 import { MarkdownExtractor } from './markdown.extractor.js';
@@ -69,6 +72,7 @@ export class ExtractionPipeline {
 
     const allNodes: GraphNode[] = [];
     const allRelationships: GraphRelationship[] = [];
+    const allHttpCallSites: import('@ekg/shared').ExtractedHttpCallSite[] = [];
 
     // Step 0: Repo metadata (CODEOWNERS + latest commit)
     const metadata = await this.metadataScanner.scan(repoDir);
@@ -181,6 +185,25 @@ export class ExtractionPipeline {
 
         allNodes.push(...extraction.nodes);
         allRelationships.push(...extraction.relationships);
+
+        // Phase 1.5 follow-ups — Kafka producers/consumers + HTTP call sites.
+        const matchingSvc = this.findServiceForFile(file.relativePath, servicesByDirLen);
+        if (matchingSvc && result.kafka) {
+          this.emitKafkaEdges(result, matchingSvc.name, repoUrl, allNodes, allRelationships);
+        }
+        if (result.httpCallSites && result.httpCallSites.length > 0) {
+          for (const site of result.httpCallSites) {
+            allHttpCallSites.push({
+              url: site.url,
+              method: site.method,
+              clientLibrary: site.clientLibrary,
+              sourceLine: site.sourceLine,
+              filePath: result.filePath,
+              isTemplate: site.isTemplate,
+              ...(site.callerSymbolId ? { callerSymbolId: `${repoUrl}:${site.callerSymbolId}` } : {}),
+            });
+          }
+        }
 
         // Symbol-level extraction (Phase 1.3) — TS/JS only. The parser only
         // populates `symbols` for files it owns; multi-language parsers leave
@@ -318,7 +341,56 @@ export class ExtractionPipeline {
       relationships: uniqueRels,
       sourceFile: repoDir,
       repoUrl,
+      httpCallSites: allHttpCallSites,
     };
+  }
+
+  /**
+   * Emit `Topic` nodes (id `topic:<name>`, shared across services for
+   * cross-repo linking) plus `Service -[PRODUCES|CONSUMES]-> Topic` edges.
+   * Idempotent; the pipeline-level dedupe collapses repeats.
+   */
+  private emitKafkaEdges(
+    result: ParseResult,
+    serviceName: string,
+    repoUrl: string,
+    nodes: GraphNode[],
+    relationships: GraphRelationship[],
+  ): void {
+    const kafka = result.kafka;
+    if (!kafka) return;
+    const serviceId = `service:${serviceName}`;
+    const seen = new Set<string>();
+    const emit = (refs: readonly { name: string; template?: string; sourceLine: number; confidence: 'HIGH' | 'MEDIUM' }[], type: 'PRODUCES' | 'CONSUMES'): void => {
+      for (const ref of refs) {
+        const topicId = `topic:${ref.name}`;
+        nodes.push({
+          id: topicId,
+          label: 'Topic',
+          name: ref.name,
+          properties: {
+            name: ref.name,
+            ...(ref.template ? { template: ref.template } : {}),
+          },
+        });
+        const dedupKey = `${type}|${serviceId}|${topicId}`;
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
+        const conf: EdgeConfidence = ref.confidence;
+        relationships.push({
+          type,
+          sourceId: serviceId,
+          targetId: topicId,
+          confidence: conf,
+          properties: {
+            sourceFile: result.filePath,
+            sourceLine: ref.sourceLine,
+          },
+        });
+      }
+    };
+    emit(kafka.producers, 'PRODUCES');
+    emit(kafka.consumers, 'CONSUMES');
   }
 
   /**

@@ -9,7 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createLogger } from '@ekg/shared';
 import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
-import { SqliteRepository, SnapshotRepository, DlqRepository } from '@ekg/storage';
+import { SqliteRepository, SnapshotRepository, DlqRepository, UnresolvedHttpRepository } from '@ekg/storage';
 import { RuntimeProviderRegistry } from '@ekg/advanced';
 import { AdapterRegistry, CapabilityRouter } from '@ekg/adapters';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
@@ -49,6 +49,7 @@ import { registerListAdaptersTool } from './tools/list-adapters.tool.js';
 import { registerAdapterQueryTool } from './tools/adapter-query.tool.js';
 // Phase 1.1 — DLQ surface for bulk-ingestion reliability.
 import { registerListDlqTool } from './tools/list-dlq.tool.js';
+import { registerListUnresolvedHttpCallsTool } from './tools/list-unresolved-http-calls.tool.js';
 import { registerRetryDlqTool } from './tools/retry-dlq.tool.js';
 
 // Resources
@@ -165,6 +166,10 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
     token: deps.gitlabConfig.token,
     defaultConcurrency: deps.gitlabConfig.concurrency,
   });
+
+  // Phase 1.5 — surface unresolved cross-service HTTP calls.
+  const unresolvedHttpRepo = new UnresolvedHttpRepository(deps.sqliteRepo.getConnection());
+  registerListUnresolvedHttpCallsTool(server, unresolvedHttpRepo);
 
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);
