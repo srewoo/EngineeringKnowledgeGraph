@@ -58,8 +58,30 @@ export interface CompletionResponse {
   readonly stopReason: StopReason;
 }
 
+export interface CompletionDelta {
+  /** Incremental assistant text. */
+  readonly textDelta?: string;
+  /** A new tool call has started; full call shape (we don't stream argument deltas at this layer). */
+  readonly toolCallStart?: ToolCall;
+  /** Optional incremental argument text for a previously-started tool call. */
+  readonly toolCallDelta?: { readonly id: string; readonly argDelta: string };
+  /** A tool call has completed (provider signalled the end of its argument stream). */
+  readonly toolCallEnd?: { readonly id: string };
+  /** Token-usage update. */
+  readonly usage?: Partial<{ inputTokens: number; outputTokens: number }>;
+  /** Final stop reason — emitted at most once. */
+  readonly stopReason?: StopReason;
+}
+
 export interface LlmProvider {
   readonly id: LlmProviderId;
   readonly model: string;
   complete(req: CompletionRequest): Promise<CompletionResponse>;
+  /**
+   * Optional streaming variant. Yields deltas as they arrive. Implementations
+   * MUST yield exactly one final delta carrying `stopReason` (and ideally
+   * final `usage`). For simplicity, we treat tool calls as atomic — yield
+   * `toolCallStart` once with the full ToolCall when complete.
+   */
+  completeStream?(req: CompletionRequest): AsyncIterable<CompletionDelta>;
 }

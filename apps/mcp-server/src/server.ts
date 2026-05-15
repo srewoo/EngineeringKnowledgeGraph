@@ -9,7 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createLogger } from '@ekg/shared';
 import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
-import { SqliteRepository, SnapshotRepository, DlqRepository, UnresolvedHttpRepository } from '@ekg/storage';
+import { SqliteRepository, SnapshotRepository, DlqRepository, UnresolvedHttpRepository, AgentSessionRepository } from '@ekg/storage';
 import { RuntimeProviderRegistry } from '@ekg/advanced';
 import { AdapterRegistry, CapabilityRouter } from '@ekg/adapters';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
@@ -36,6 +36,8 @@ import { registerGetMetricsTool } from './tools/get-metrics.tool.js';
 import { registerSearchSemanticTool } from './tools/search-semantic.tool.js';
 import { registerAskQuestionTool } from './tools/ask-question.tool.js';
 import { registerAnswerQuestionTool } from './tools/answer-question.tool.js';
+import { registerStartSessionTool } from './tools/start-session.tool.js';
+import { registerEndSessionTool } from './tools/end-session.tool.js';
 import { registerDataFreshnessTool } from './tools/data-freshness.tool.js';
 import { registerIngestOnPushTool } from './tools/ingest-on-push.tool.js';
 import { registerSubmitFeedbackTool } from './tools/submit-feedback.tool.js';
@@ -124,11 +126,15 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
       ...(deps.embeddingsService ? { embeddingsService: deps.embeddingsService } : {}),
       neo4jClient: deps.neo4jClient,
     });
+    const agentSessionRepo = new AgentSessionRepository(deps.sqliteRepo.getConnection());
     registerAnswerQuestionTool(server, {
       searchText: deps.searchTextRepo,
       ...(deps.embeddingsService ? { embeddingsService: deps.embeddingsService } : {}),
       neo4jClient: deps.neo4jClient,
+      sessions: agentSessionRepo,
     });
+    registerStartSessionTool(server, agentSessionRepo);
+    registerEndSessionTool(server, agentSessionRepo);
   } else {
     logger.warn('ask_question / answer_question tools not registered: searchTextRepo missing');
   }
@@ -180,7 +186,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 31 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 33 tools, 4 resources, 2 prompts');
 
   return server;
 }

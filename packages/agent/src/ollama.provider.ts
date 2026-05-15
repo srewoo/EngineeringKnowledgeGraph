@@ -10,6 +10,7 @@ import type {
   LlmProvider,
   CompletionRequest,
   CompletionResponse,
+  CompletionDelta,
   Message,
   ToolCall,
   StopReason,
@@ -106,6 +107,82 @@ export class OllamaProvider implements LlmProvider {
       },
       stopReason: toolCalls.length > 0 ? 'tool_use' : mapStopReason(json.done_reason),
     };
+  }
+
+  async *completeStream(req: CompletionRequest): AsyncIterable<CompletionDelta> {
+    const body = {
+      model: this.model,
+      stream: true,
+      options: {
+        num_predict: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+        temperature: req.temperature ?? DEFAULT_TEMPERATURE,
+      },
+      messages: [
+        { role: 'system', content: req.system },
+        ...req.messages.map(toOllamaMessage),
+      ],
+      ...(req.tools && req.tools.length > 0
+        ? {
+            tools: req.tools.map((t) => ({
+              type: 'function' as const,
+              function: { name: t.name, description: t.description, parameters: t.inputSchema },
+            })),
+          }
+        : {}),
+    };
+    const res = await this.fetchImpl(`${this.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok || !res.body) {
+      const txt = await safeText(res);
+      throw new Error(`Ollama stream ${res.status}: ${txt}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buf = '';
+    let stop: StopReason | undefined;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const calls: ToolCall[] = [];
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let chunk: OllamaResponse;
+          try { chunk = JSON.parse(line) as OllamaResponse; } catch { continue; }
+          if (chunk.message?.content) yield { textDelta: chunk.message.content };
+          if (chunk.message?.tool_calls) {
+            for (const tc of chunk.message.tool_calls) {
+              const call: ToolCall = {
+                id: `ollama-tc-${calls.length}`,
+                name: tc.function?.name ?? '',
+                arguments: normaliseArgs(tc.function?.arguments),
+              };
+              if (call.name) calls.push(call);
+            }
+          }
+          if (chunk.done_reason) stop = mapStopReason(chunk.done_reason);
+          if (chunk.prompt_eval_count) inputTokens = chunk.prompt_eval_count;
+          if (chunk.eval_count) outputTokens = chunk.eval_count;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    for (const call of calls) {
+      yield { toolCallStart: call };
+      yield { toolCallEnd: { id: call.id } };
+    }
+    yield { usage: { inputTokens, outputTokens } };
+    yield { stopReason: calls.length > 0 ? 'tool_use' : (stop ?? 'end_turn') };
   }
 }
 

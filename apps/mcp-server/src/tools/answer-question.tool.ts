@@ -10,7 +10,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { createLogger } from '@ekg/shared';
 import { HybridSearch, Neo4jGraphExpander, getReranker } from '@ekg/search';
-import type { SearchTextRepository } from '@ekg/storage';
+import type { SearchTextRepository, AgentSessionRepository } from '@ekg/storage';
 import type { EmbeddingsService } from '@ekg/worker';
 import type { Neo4jClient } from '@ekg/graph';
 import {
@@ -25,6 +25,7 @@ import {
   buildRouteClassifyTool,
   getAgentProvider,
   readAgentEnv,
+  makeStreamingAgent,
 } from '@ekg/agent';
 
 export interface AnswerQuestionDeps {
@@ -32,6 +33,7 @@ export interface AnswerQuestionDeps {
   readonly embeddingsService?: EmbeddingsService;
   readonly neo4jClient: Neo4jClient;
   readonly reposRoot?: string;
+  readonly sessions?: AgentSessionRepository;
 }
 
 export function registerAnswerQuestionTool(server: McpServer, deps: AnswerQuestionDeps): void {
@@ -44,8 +46,10 @@ export function registerAnswerQuestionTool(server: McpServer, deps: AnswerQuesti
     {
       question: z.string().min(1).describe('Natural-language question'),
       repo: z.string().optional().describe('Restrict to a single repo URL'),
+      sessionId: z.string().uuid().optional().describe('Multi-turn session id from start_session'),
+      stream: z.boolean().optional().describe('Opt-in streaming events; falls back to env EKG_AGENT_STREAMING'),
     },
-    async ({ question, repo }) => {
+    async ({ question, repo, sessionId, stream }) => {
       if (!env.enabled) {
         return {
           content: [{
@@ -88,14 +92,31 @@ export function registerAnswerQuestionTool(server: McpServer, deps: AnswerQuesti
           provider,
           tools: registry,
           planExecutor: { hybrid, neo4j: deps.neo4jClient },
+          ...(deps.sessions ? { sessions: deps.sessions } : {}),
         });
 
-        const envelope = await agent.ask(question, {
+        const wantsStream = stream ?? env.streaming;
+        const askOpts = {
           ...(repo ? { repo } : {}),
+          ...(sessionId ? { sessionId } : {}),
           maxTokens: env.maxTokens,
-        });
+        };
+        let envelope;
+        if (wantsStream) {
+          // MCP SDK doesn't currently expose a clean streaming-response API
+          // from tool handlers; we collect deltas and return the full envelope.
+          // The streaming-internal API is still useful for direct callers.
+          const streaming = makeStreamingAgent(agent);
+          for await (const evt of streaming.askStream(question, askOpts)) {
+            if (evt.kind === 'final') envelope = evt.envelope;
+          }
+          if (!envelope) throw new Error('streaming agent produced no final envelope');
+          logger.info({ stream: true }, 'answer_question stream collected');
+        } else {
+          envelope = await agent.ask(question, askOpts);
+        }
         logger.info(
-          { status: envelope.status, iterations: envelope.usage.iterations, tokens: envelope.usage },
+          { status: envelope.status, iterations: envelope.usage.iterations, tokens: envelope.usage, sessionId },
           'answer_question completed',
         );
         return {

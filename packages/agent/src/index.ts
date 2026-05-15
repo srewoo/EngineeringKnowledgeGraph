@@ -4,7 +4,27 @@ export type {
   AskOptions,
   AnswerEnvelope,
   ToolCallTrace,
+  AgentEvent,
 } from './agent.js';
+export { makeStreamingAgent } from './agent.stream.js';
+export type { StreamingAgent } from './agent.stream.js';
+export {
+  sanitiseForLlm,
+  wrapUntrusted,
+  stripDangerous,
+  HIGH_RISK_TOOLS,
+  UNTRUSTED_GUARDRAIL,
+  SNIPPET_BYTE_CAP,
+} from './sanitiser.js';
+export {
+  loadSession,
+  saveSession,
+  enforceByteCap,
+  readMaxTurns,
+  SESSION_DEFAULT_MAX_TURNS,
+  SESSION_MAX_BYTES,
+} from './session.js';
+export type { SessionState, SessionMetadata, SessionRepoLike } from './session.js';
 
 export {
   getAgentProvider,
@@ -19,6 +39,7 @@ export type {
   LlmProviderId,
   CompletionRequest,
   CompletionResponse,
+  CompletionDelta,
   Message,
   ToolCall,
   ToolSpec,

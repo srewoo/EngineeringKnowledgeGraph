@@ -24,6 +24,7 @@ const envSchema = z.object({
   EKG_AGENT_PROVIDER: z.enum(['openai', 'anthropic', 'ollama']).default('ollama'),
   EKG_AGENT_MODEL: z.string().optional(),
   EKG_AGENT_MAX_TOKENS: z.coerce.number().int().positive().optional(),
+  EKG_AGENT_STREAMING: z.enum(['true', 'false']).default('false'),
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   OLLAMA_URL: z.string().optional(),
@@ -34,6 +35,7 @@ export interface AgentEnv {
   readonly provider: 'openai' | 'anthropic' | 'ollama';
   readonly model?: string;
   readonly maxTokens: number;
+  readonly streaming: boolean;
 }
 
 export function readAgentEnv(env: NodeJS.ProcessEnv = process.env): AgentEnv {
@@ -42,6 +44,7 @@ export function readAgentEnv(env: NodeJS.ProcessEnv = process.env): AgentEnv {
     EKG_AGENT_PROVIDER: env['EKG_AGENT_PROVIDER'],
     EKG_AGENT_MODEL: env['EKG_AGENT_MODEL'],
     EKG_AGENT_MAX_TOKENS: env['EKG_AGENT_MAX_TOKENS'],
+    EKG_AGENT_STREAMING: env['EKG_AGENT_STREAMING'],
     OPENAI_API_KEY: env['OPENAI_API_KEY'],
     ANTHROPIC_API_KEY: env['ANTHROPIC_API_KEY'],
     OLLAMA_URL: env['OLLAMA_URL'],
@@ -51,6 +54,7 @@ export function readAgentEnv(env: NodeJS.ProcessEnv = process.env): AgentEnv {
     provider: parsed.EKG_AGENT_PROVIDER,
     ...(parsed.EKG_AGENT_MODEL ? { model: parsed.EKG_AGENT_MODEL } : {}),
     maxTokens: parsed.EKG_AGENT_MAX_TOKENS ?? AGENT_DEFAULT_MAX_TOKENS,
+    streaming: parsed.EKG_AGENT_STREAMING === 'true',
   };
 }
 
