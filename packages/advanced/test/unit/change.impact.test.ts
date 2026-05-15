@@ -19,6 +19,11 @@ describe('clampDepth', () => {
   it('rejects NaN', () => {
     expect(clampDepth(Number.NaN)).toBe(1);
   });
+  it('IMPACT_MAX_DEPTH is now 8 (raised from 4)', () => {
+    expect(IMPACT_MAX_DEPTH).toBe(8);
+    expect(clampDepth(8)).toBe(8);
+    expect(clampDepth(7)).toBe(7);
+  });
 });
 
 class StubExecutor implements ImpactExecutor {
@@ -75,6 +80,18 @@ describe('analyzeImpact', () => {
     const exec = new StubExecutor([]);
     await analyzeImpact(exec, { label: 'Column', id: 'col:x' });
     expect(exec.receivedLabel).toBe('Column');
+    expect(exec.receivedDepth).toBe(IMPACT_MAX_DEPTH);
+  });
+
+  it('respects opts.maxHops up to the new ceiling of 8', async () => {
+    const exec = new StubExecutor([]);
+    await analyzeImpact(exec, { label: 'Function', id: 'fn:t' }, { maxHops: 8 });
+    expect(exec.receivedDepth).toBe(8);
+  });
+
+  it('clamps maxHops above the ceiling', async () => {
+    const exec = new StubExecutor([]);
+    await analyzeImpact(exec, { label: 'Function', id: 'fn:t' }, { maxHops: 999 });
     expect(exec.receivedDepth).toBe(IMPACT_MAX_DEPTH);
   });
 

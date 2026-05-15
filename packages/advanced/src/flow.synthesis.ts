@@ -8,9 +8,20 @@
 
 import { createLogger, type Logger } from '@ekg/shared';
 import type { Neo4jClient } from '@ekg/graph';
+import {
+  prune,
+  DEFAULT_PRUNING_POLICY,
+  DEFAULT_MAX_NODES_PER_LAYER,
+  type PruningPolicy,
+  type Prunable,
+} from './traversal.pruning.js';
 
 export const FLOW_DEFAULT_HOPS = 8;
-export const FLOW_MAX_HOPS = 10;
+/**
+ * Hard ceiling for flow walks — raised from 10 to 15. Pruning policies keep
+ * the candidate set bounded even at higher depths. See traversal.pruning.ts.
+ */
+export const FLOW_MAX_HOPS = 15;
 
 export type FlowSeedKind = 'route' | 'api' | 'service';
 
@@ -47,6 +58,8 @@ export interface FlowGraph {
 export interface FlowOptions {
   readonly maxHops?: number;
   readonly includeKafka?: boolean;
+  readonly maxNodesPerLayer?: number;
+  readonly pruning?: PruningPolicy;
 }
 
 interface RawPathRow {
@@ -96,7 +109,30 @@ export async function synthesizeFlow(
   const hops = clampHops(opts.maxHops ?? FLOW_DEFAULT_HOPS);
   const includeKafka = opts.includeKafka ?? true;
   const rawPaths = await exec.walk(seed, hops, includeKafka);
-  return buildFlowGraph(seed, rawPaths);
+  const prunedPaths = prunePaths(rawPaths, opts);
+  return buildFlowGraph(seed, prunedPaths);
+}
+
+/**
+ * Apply pruning policy across path rows. Each row's tail node is the
+ * "result" we score; rows whose tail wins the layer are kept.
+ */
+function prunePaths(rows: readonly RawPathRow[], opts: FlowOptions): readonly RawPathRow[] {
+  const policy = opts.pruning ?? DEFAULT_PRUNING_POLICY;
+  const cap = opts.maxNodesPerLayer ?? DEFAULT_MAX_NODES_PER_LAYER;
+  // One Prunable per row — wraps the original row by reference.
+  type Wrapped = Prunable & { readonly __row: RawPathRow };
+  const wrapped: Wrapped[] = rows.map((row, idx) => {
+    const tail = row.nodes[row.nodes.length - 1];
+    return {
+      id: `${tail?.id ?? '__row'}#${idx}`,
+      distance: Math.max(0, row.nodes.length - 1),
+      ...(tail?.kind ? { serviceName: tail.kind } : {}),
+      __row: row,
+    };
+  });
+  const kept = prune(wrapped, { policy, maxNodesPerLayer: cap }) as readonly Wrapped[];
+  return kept.map((w) => w.__row);
 }
 
 export function clampHops(n: number): number {

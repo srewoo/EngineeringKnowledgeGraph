@@ -10,7 +10,13 @@ import { createLogger } from '@ekg/shared';
 import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
 import { SqliteRepository, SnapshotRepository, DlqRepository, UnresolvedHttpRepository, AgentSessionRepository } from '@ekg/storage';
-import { RuntimeProviderRegistry } from '@ekg/advanced';
+import {
+  RuntimeProviderRegistry,
+  SnapshotScheduler,
+  Neo4jSnapshotSource,
+  readCadenceFromEnv,
+  type NarrationAgent,
+} from '@ekg/advanced';
 import { AdapterRegistry, CapabilityRouter } from '@ekg/adapters';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
 import type { EmbeddingsService } from '@ekg/worker';
@@ -46,6 +52,9 @@ import { registerEvalRunTool } from './tools/eval-run.tool.js';
 import { registerSynthesizeFlowTool } from './tools/synthesize-flow.tool.js';
 import { registerAnalyzeImpactV2Tool } from './tools/analyze-impact-v2.tool.js';
 import { registerSnapshotGraphTool, registerDiffSnapshotsTool } from './tools/snapshot.tools.js';
+import { registerNarrateFlowTool } from './tools/narrate-flow.tool.js';
+import { registerSnapshotStatusTool } from './tools/snapshot-status.tool.js';
+import { registerSnapshotPruneTool } from './tools/snapshot-prune.tool.js';
 import { registerRuntimeEvidenceTool } from './tools/runtime-evidence.tool.js';
 import { registerListAdaptersTool } from './tools/list-adapters.tool.js';
 import { registerAdapterQueryTool } from './tools/adapter-query.tool.js';
@@ -73,6 +82,17 @@ export interface ServerDependencies {
   readonly searchTextRepo?: SearchTextRepository;
   readonly runtimeRegistry?: RuntimeProviderRegistry;
   readonly adapterRegistry?: AdapterRegistry;
+  /**
+   * Optional narration agent — when present and `EKG_AGENT_ENABLED=true`, the
+   * `narrate_flow` tool produces LLM-polished output instead of the
+   * deterministic skeleton.
+   */
+  readonly narrationAgent?: NarrationAgent | null;
+  /**
+   * Optional snapshot scheduler. When provided, `snapshot_status` reports its
+   * cadence and next-fire wallclock; otherwise that tool reports nulls.
+   */
+  readonly snapshotScheduler?: SnapshotScheduler | null;
   readonly gitlabConfig: {
     readonly gitlabUrl: string;
     readonly token: string;
@@ -155,6 +175,12 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerAnalyzeImpactV2Tool(server, deps.neo4jClient);
   registerSnapshotGraphTool(server, deps.neo4jClient, snapshotRepo);
   registerDiffSnapshotsTool(server, snapshotRepo);
+  registerNarrateFlowTool(server, {
+    neo4j: deps.neo4jClient,
+    ...(deps.narrationAgent !== undefined ? { agent: deps.narrationAgent } : {}),
+  });
+  registerSnapshotStatusTool(server, snapshotRepo, deps.snapshotScheduler ?? null, readCadenceFromEnv());
+  registerSnapshotPruneTool(server, snapshotRepo);
   registerRuntimeEvidenceTool(server, runtimeRegistry);
 
   // Phase 6 — external MCP adapter framework.
@@ -186,7 +212,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 33 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 36 tools, 4 resources, 2 prompts');
 
   return server;
 }

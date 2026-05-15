@@ -10,8 +10,19 @@
 
 import { createLogger, type Logger } from '@ekg/shared';
 import type { Neo4jClient } from '@ekg/graph';
+import {
+  prune,
+  DEFAULT_PRUNING_POLICY,
+  DEFAULT_MAX_NODES_PER_LAYER,
+  type PruningPolicy,
+} from './traversal.pruning.js';
 
-export const IMPACT_MAX_DEPTH = 4;
+/**
+ * Hard ceiling on traversal depth. Raised from 4 to 8 to reach 2nd-tier
+ * dependencies (e.g. column → table → query → function → caller → caller's
+ * caller → service boundary). Pruning policies keep the candidate set bounded.
+ */
+export const IMPACT_MAX_DEPTH = 8;
 export const IMPACT_PER_LAYER_CAP = 200;
 
 export type ImpactLabel = 'Column' | 'Function' | 'Table' | 'API';
@@ -50,6 +61,16 @@ export interface RawImpactRow {
   readonly distance: number;
   readonly serviceName?: string;
   readonly repoUrl?: string;
+  /** Number of distinct call sites for `byCallCount` pruning. */
+  readonly callSites?: number;
+  /** Source-side service for an incoming edge — used by `ownership` pruning. */
+  readonly fromService?: string;
+}
+
+export interface ImpactOptions {
+  readonly maxHops?: number;
+  readonly maxNodesPerLayer?: number;
+  readonly pruning?: PruningPolicy;
 }
 
 export class Neo4jImpactExecutor implements ImpactExecutor {
@@ -66,22 +87,40 @@ export class Neo4jImpactExecutor implements ImpactExecutor {
     const t0 = Date.now();
     const rows = await this.client.executeRead(async (tx) => {
       const r = await tx.run(cypher, { id });
-      return r.records.map((rec) => ({
-        id: String(rec.get('id') ?? ''),
-        label: String(rec.get('lbl') ?? ''),
-        name: String(rec.get('name') ?? ''),
-        distance: toNum(rec.get('distance')),
-        serviceName: optStr(rec.get('serviceName')),
-        repoUrl: optStr(rec.get('repoUrl')),
-      } satisfies RawImpactRow));
+      return r.records.map((rec) => {
+        const serviceName = optStr(rec.get('serviceName'));
+        const repoUrl = optStr(rec.get('repoUrl'));
+        const callSites = toNum(rec.get('callSites'));
+        return {
+          id: String(rec.get('id') ?? ''),
+          label: String(rec.get('lbl') ?? ''),
+          name: String(rec.get('name') ?? ''),
+          distance: toNum(rec.get('distance')),
+          ...(serviceName ? { serviceName } : {}),
+          ...(repoUrl ? { repoUrl } : {}),
+          ...(callSites > 0 ? { callSites } : {}),
+        } satisfies RawImpactRow;
+      });
     });
     this.logger.info({ label, id, ms: Date.now() - t0, rows: rows.length }, 'Impact query complete');
     return rows;
   }
 }
 
-export async function analyzeImpact(exec: ImpactExecutor, target: ImpactTarget): Promise<ImpactReport> {
-  const rows = await exec.query(target.label, target.id, IMPACT_MAX_DEPTH, IMPACT_PER_LAYER_CAP);
+export async function analyzeImpact(
+  exec: ImpactExecutor,
+  target: ImpactTarget,
+  opts: ImpactOptions = {},
+): Promise<ImpactReport> {
+  const depth = clampDepth(opts.maxHops ?? IMPACT_MAX_DEPTH);
+  const perLayer = clampPerLayer(opts.maxNodesPerLayer ?? IMPACT_PER_LAYER_CAP);
+  const rawRows = await exec.query(target.label, target.id, depth, perLayer);
+  // Deterministic pruning before aggregation so byService/byRepo reflect the
+  // pruned set (otherwise counts diverge from what the caller can inspect).
+  const rows = prune(rawRows, {
+    policy: opts.pruning ?? DEFAULT_PRUNING_POLICY,
+    maxNodesPerLayer: opts.maxNodesPerLayer ?? DEFAULT_MAX_NODES_PER_LAYER,
+  });
   const direct: NodeRef[] = [];
   const transitive: NodeRef[] = [];
   const byService: Record<string, number> = {};
@@ -128,13 +167,16 @@ function buildImpactCypher(label: ImpactLabel, depth: number, perLayer: number):
     OPTIONAL MATCH (svc:Service)
     WHERE svc.id = coalesce(n.serviceId, '__none__')
        OR svc.name = coalesce(n.serviceName, '__none__')
+    OPTIONAL MATCH (n)-[cs:CALLS]->()
+    WITH n, distance, svc, count(DISTINCT cs) AS callSites
     RETURN
       coalesce(n.id, '') AS id,
       coalesce(labels(n)[0], '') AS lbl,
       coalesce(n.name, '') AS name,
       distance AS distance,
       coalesce(svc.name, n.serviceName, '') AS serviceName,
-      coalesce(n.repoUrl, '') AS repoUrl
+      coalesce(n.repoUrl, '') AS repoUrl,
+      callSites AS callSites
     ORDER BY distance ASC
     LIMIT ${cap * d}
   `.trim();
@@ -156,6 +198,11 @@ function labelPattern(label: ImpactLabel, depth: number): string {
 export function clampDepth(d: number): number {
   if (!Number.isFinite(d) || d < 1) return 1;
   return Math.min(Math.floor(d), IMPACT_MAX_DEPTH);
+}
+
+export function clampPerLayer(n: number): number {
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(Math.floor(n), IMPACT_PER_LAYER_CAP);
 }
 
 function byDistanceThenName(a: NodeRef, b: NodeRef): number {

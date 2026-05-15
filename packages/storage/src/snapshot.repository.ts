@@ -92,6 +92,25 @@ export class SnapshotRepository {
     return row ? this.mapRow(row) : undefined;
   }
 
+  /**
+   * List snapshots whose label starts with the given prefix, newest first.
+   * Used by `snapshot_prune` to enumerate auto-* snapshots.
+   */
+  listByPrefix(prefix: string, limit = 1000): readonly Snapshot[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM graph_snapshots
+       WHERE label LIKE ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    ).all(`${prefix}%`, limit) as Array<Record<string, unknown>>;
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  deleteById(id: string): boolean {
+    const info = this.db.prepare('DELETE FROM graph_snapshots WHERE id = ?').run(id);
+    return info.changes > 0;
+  }
+
   private mapRow(row: Record<string, unknown>): Snapshot {
     return {
       id: row['id'] as string,

@@ -19,7 +19,8 @@ dotenv.config({ path: envPath });
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
-import { SqliteRepository, UnresolvedHttpRepository } from '@ekg/storage';
+import { SqliteRepository, UnresolvedHttpRepository, SnapshotRepository } from '@ekg/storage';
+import { SnapshotScheduler, Neo4jSnapshotSource, readCadenceFromEnv } from '@ekg/advanced';
 import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService, SearchIndexService } from '@ekg/worker';
 import { bootstrapAdapters } from '@ekg/adapters';
 import { createMcpServer } from './server.js';
@@ -140,6 +141,16 @@ async function main(): Promise<void> {
     log.warn({ error: err instanceof Error ? err.message : String(err) }, 'adapter bootstrap failed');
   }
 
+  // Snapshot scheduler — in-process cron-lite. Reads cadence from
+  // EKG_SNAPSHOT_SCHEDULE; `off` disables.
+  const schedulerCadence = readCadenceFromEnv();
+  const snapshotRepoForScheduler = new SnapshotRepository(sqliteRepo.getConnection());
+  const snapshotScheduler = new SnapshotScheduler({
+    source: new Neo4jSnapshotSource(neo4jClient),
+    repo: snapshotRepoForScheduler,
+    cadence: schedulerCadence,
+  });
+
   const server = createMcpServer({
     neo4jClient,
     graphQueries,
@@ -151,6 +162,7 @@ async function main(): Promise<void> {
     searchTextRepo,
     ...(adapterRegistry ? { adapterRegistry } : {}),
     ...(runtimeRegistry ? { runtimeRegistry } : {}),
+    snapshotScheduler,
     gitlabConfig: {
       gitlabUrl: env.gitlabUrl,
       token: env.gitToken ?? '',
@@ -165,12 +177,22 @@ async function main(): Promise<void> {
 
   logger.info('EKG MCP Server running on stdio');
 
+  // Start the snapshot scheduler after the server is up so initial catch-up
+  // doesn't block the connect handshake.
+  try {
+    snapshotScheduler.start();
+    log.info({ cadence: schedulerCadence }, 'Snapshot scheduler started');
+  } catch (err) {
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'snapshot scheduler failed to start');
+  }
+
   // Graceful shutdown — drain in-flight bulk jobs before closing connections.
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'Shutting down — draining bulk ingestion');
+    try { snapshotScheduler.stop(); } catch { /* ignore */ }
     try {
       await bulkService.shutdown(30_000);
     } catch (e) {

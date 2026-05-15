@@ -25,17 +25,26 @@ export {
   analyzeImpact,
   Neo4jImpactExecutor,
   clampDepth,
+  clampPerLayer,
   IMPACT_MAX_DEPTH,
   IMPACT_PER_LAYER_CAP,
 } from './change.impact.js';
 export type {
   ImpactLabel,
   ImpactTarget,
+  ImpactOptions,
   NodeRef,
   ImpactReport,
   ImpactExecutor,
   RawImpactRow,
 } from './change.impact.js';
+
+export {
+  prune,
+  DEFAULT_PRUNING_POLICY,
+  DEFAULT_MAX_NODES_PER_LAYER,
+} from './traversal.pruning.js';
+export type { PruningPolicy, Prunable, PruneOptions } from './traversal.pruning.js';
 
 export {
   buildSnapshot,
@@ -54,6 +63,35 @@ export type {
 
 export { diff } from './snapshot.diff.js';
 export type { SnapshotDiff, ChangedEdge, DiffSummary } from './snapshot.diff.js';
+
+export {
+  FlowNarrator,
+  NARRATION_MAX_INPUT_TOKENS,
+  NARRATION_MAX_OUTPUT_TOKENS,
+  NARRATION_DEFAULT_BULLETS,
+  renderSkeleton,
+} from './flow.narrator.js';
+export type {
+  Narration,
+  NarrationCitation,
+  NarrationAudience,
+  NarrateOptions,
+  NarrationAgent,
+  NarrationAgentResult,
+} from './flow.narrator.js';
+
+export {
+  SnapshotScheduler,
+  readCadenceFromEnv,
+  cadenceMs,
+  DEFAULT_CADENCE,
+  SCHEDULER_LABEL_PREFIX,
+} from './snapshot.scheduler.js';
+export type {
+  SnapshotCadence,
+  SchedulerDeps,
+  SchedulerSnapshotRepo,
+} from './snapshot.scheduler.js';
 
 export { RuntimeProviderRegistry } from './runtime.registry.js';
 export { NoopRuntimeProvider } from './noop.runtime.provider.js';
