@@ -13,6 +13,32 @@ import { Neo4jClient } from './neo4j.client.js';
 const NODE_BATCH_SIZE = 500;
 const REL_BATCH_SIZE = 500;
 
+/**
+ * Hard cap on UNWIND chunk size shipped per-transaction.
+ *
+ * Neo4j enforces a server-side transaction timeout (10 min in this deploy).
+ * Above ~5K rows in a single MERGE tx we have repeatedly seen tx-timeouts
+ * and Forseti exclusive-lock contention on Service nodes when concurrent
+ * write workers touch the same hot node. Splitting per chunk keeps each
+ * tx short and releases locks frequently.
+ */
+export const MAX_UNWIND_CHUNK_SIZE = 5_000;
+
+/**
+ * Pure helper — splits an array into fixed-size chunks. Returns an empty
+ * list when input is empty so callers can `for…of` without a guard.
+ * Throws on size <= 0 — silent fallback would mean one giant chunk.
+ */
+export function chunkRows<T>(rows: readonly T[], size: number): T[][] {
+  if (size <= 0) throw new Error(`chunkRows: size must be > 0, got ${size}`);
+  if (rows.length === 0) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < rows.length; i += size) {
+    out.push(rows.slice(i, i + size));
+  }
+  return out;
+}
+
 export class GraphRepository {
   private readonly client: Neo4jClient;
   private readonly logger: Logger;
@@ -44,14 +70,24 @@ export class GraphRepository {
 
     let total = 0;
     for (const [label, bucket] of byLabel) {
-      for (let i = 0; i < bucket.length; i += NODE_BATCH_SIZE) {
-        const batch = bucket.slice(i, i + NODE_BATCH_SIZE);
+      // Inner batches stay at NODE_BATCH_SIZE (small txs = fewer locks held).
+      // chunkRows at MAX_UNWIND_CHUNK_SIZE is the upper-bound safety net so a
+      // future change to NODE_BATCH_SIZE can never exceed Neo4j tx timeout.
+      const innerBatches = chunkRows(bucket, NODE_BATCH_SIZE);
+      const totalChunks = innerBatches.length;
+      for (let chunkIndex = 0; chunkIndex < innerBatches.length; chunkIndex++) {
+        const batch = innerBatches[chunkIndex]!;
+        if (batch.length > MAX_UNWIND_CHUNK_SIZE) {
+          // Defensive: should be unreachable while NODE_BATCH_SIZE <= 5K.
+          throw new Error(`Node batch ${batch.length} exceeds MAX_UNWIND_CHUNK_SIZE`);
+        }
         const rows = batch.map((n) => ({
           id: n.id,
           name: n.name,
           properties: n.properties,
         }));
 
+        const startedAt = Date.now();
         await this.client.executeWrite(async (tx) => {
           await tx.run(
             `UNWIND $rows AS row
@@ -62,6 +98,10 @@ export class GraphRepository {
             { rows },
           );
         });
+        const latencyMs = Date.now() - startedAt;
+        this.logger.debug({
+          label, chunkIndex, chunkSize: batch.length, totalChunks, latencyMs,
+        }, 'Node UNWIND chunk merged');
         total += batch.length;
       }
     }
@@ -90,8 +130,13 @@ export class GraphRepository {
 
     let total = 0;
     for (const [type, bucket] of byType) {
-      for (let i = 0; i < bucket.length; i += REL_BATCH_SIZE) {
-        const batch = bucket.slice(i, i + REL_BATCH_SIZE);
+      const innerBatches = chunkRows(bucket, REL_BATCH_SIZE);
+      const totalChunks = innerBatches.length;
+      for (let chunkIndex = 0; chunkIndex < innerBatches.length; chunkIndex++) {
+        const batch = innerBatches[chunkIndex]!;
+        if (batch.length > MAX_UNWIND_CHUNK_SIZE) {
+          throw new Error(`Relationship batch ${batch.length} exceeds MAX_UNWIND_CHUNK_SIZE`);
+        }
         const rows = batch.map((r) => ({
           sourceId: r.sourceId,
           targetId: r.targetId,
@@ -99,6 +144,7 @@ export class GraphRepository {
           properties: r.properties,
         }));
 
+        const startedAt = Date.now();
         await this.client.executeWrite(async (tx) => {
           await tx.run(
             `UNWIND $rows AS row
@@ -111,6 +157,10 @@ export class GraphRepository {
             { rows },
           );
         });
+        const latencyMs = Date.now() - startedAt;
+        this.logger.debug({
+          type, chunkIndex, chunkSize: batch.length, totalChunks, latencyMs,
+        }, 'Relationship UNWIND chunk merged');
         total += batch.length;
       }
     }

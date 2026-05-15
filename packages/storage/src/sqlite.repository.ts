@@ -74,6 +74,25 @@ export class SqliteRepository {
 
       CREATE INDEX IF NOT EXISTS idx_bulk_jobs_status
         ON bulk_jobs(status);
+
+      CREATE TABLE IF NOT EXISTS dead_letter_repos (
+        id TEXT PRIMARY KEY,
+        bulk_job_id TEXT NOT NULL,
+        repo_url TEXT NOT NULL,
+        repo_name TEXT NOT NULL,
+        error_category TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        first_failed_at TEXT NOT NULL,
+        last_failed_at TEXT NOT NULL,
+        resolved_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_dlq_bulk_job
+        ON dead_letter_repos(bulk_job_id);
+
+      CREATE INDEX IF NOT EXISTS idx_dlq_unresolved
+        ON dead_letter_repos(resolved_at) WHERE resolved_at IS NULL;
     `);
   }
 

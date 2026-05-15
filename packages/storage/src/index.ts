@@ -7,3 +7,5 @@ export { RepoStateRepository } from './repo-state.repository.js';
 export type { RepoState } from './repo-state.repository.js';
 export { SnapshotRepository } from './snapshot.repository.js';
 export type { Snapshot } from './snapshot.repository.js';
+export { DlqRepository } from './dlq.repository.js';
+export type { DlqRow, DlqUpsert } from './dlq.repository.js';

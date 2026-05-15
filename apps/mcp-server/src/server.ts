@@ -9,7 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createLogger } from '@ekg/shared';
 import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
-import { SqliteRepository, SnapshotRepository } from '@ekg/storage';
+import { SqliteRepository, SnapshotRepository, DlqRepository } from '@ekg/storage';
 import { RuntimeProviderRegistry } from '@ekg/advanced';
 import { AdapterRegistry, CapabilityRouter } from '@ekg/adapters';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
@@ -47,6 +47,9 @@ import { registerSnapshotGraphTool, registerDiffSnapshotsTool } from './tools/sn
 import { registerRuntimeEvidenceTool } from './tools/runtime-evidence.tool.js';
 import { registerListAdaptersTool } from './tools/list-adapters.tool.js';
 import { registerAdapterQueryTool } from './tools/adapter-query.tool.js';
+// Phase 1.1 — DLQ surface for bulk-ingestion reliability.
+import { registerListDlqTool } from './tools/list-dlq.tool.js';
+import { registerRetryDlqTool } from './tools/retry-dlq.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -153,6 +156,16 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerListAdaptersTool(server, adapterRegistry);
   registerAdapterQueryTool(server, capabilityRouter);
 
+  // Phase 1.1 — DLQ surface for bulk-ingestion reliability.
+  const dlqRepo = new DlqRepository(deps.sqliteRepo.getConnection());
+  registerListDlqTool(server, dlqRepo);
+  registerRetryDlqTool(server, {
+    bulkService: deps.bulkService,
+    dlq: dlqRepo,
+    token: deps.gitlabConfig.token,
+    defaultConcurrency: deps.gitlabConfig.concurrency,
+  });
+
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);
   registerMetricsResource(server, deps.neo4jClient);
@@ -162,7 +175,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 29 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 31 tools, 4 resources, 2 prompts');
 
   return server;
 }
