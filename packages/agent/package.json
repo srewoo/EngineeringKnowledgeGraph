@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && node -e \"const fs=require('fs');const p=require('path');const src=p.join(__dirname,'src','prompts');const dst=p.join(__dirname,'dist','prompts');fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.txt')||f.endsWith('.json')){fs.copyFileSync(p.join(src,f),p.join(dst,f))}}\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist *.tsbuildinfo"

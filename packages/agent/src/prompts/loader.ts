@@ -4,12 +4,26 @@
  * out of each system prompt for reproducibility.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { QuestionClass } from '@ekg/router';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Resolve a prompt asset. Works in three layouts:
+ *   1. `tsx`/`ts-node` running source directly: HERE = packages/agent/src/prompts.
+ *   2. Compiled JS run from `dist/prompts`: assets live next to the .js (post-build copy).
+ *   3. Compiled JS without copy: fall back to `../../src/prompts`.
+ */
+function resolveAsset(file: string): string {
+  const colocated = path.join(HERE, file);
+  if (existsSync(colocated)) return colocated;
+  const fromDist = path.join(HERE, '..', '..', 'src', 'prompts', file);
+  if (existsSync(fromDist)) return fromDist;
+  return colocated; // surface the original error
+}
 
 export interface LoadedPrompt {
   readonly text: string;
@@ -22,7 +36,7 @@ const CLASSES: readonly QuestionClass[] = [
 ];
 
 function load(file: string): LoadedPrompt {
-  const text = readFileSync(path.join(HERE, file), 'utf8');
+  const text = readFileSync(resolveAsset(file), 'utf8');
   const m = text.match(/^#\s*version:\s*(\S+)/m);
   return { text, version: m?.[1] ?? 'unversioned' };
 }
@@ -38,7 +52,7 @@ interface FewShotExample {
 }
 
 const FEW_SHOT: ReadonlyMap<QuestionClass, FewShotExample> = (() => {
-  const raw = JSON.parse(readFileSync(path.join(HERE, 'few_shot.json'), 'utf8')) as Record<string, FewShotExample>;
+  const raw = JSON.parse(readFileSync(resolveAsset('few_shot.json'), 'utf8')) as Record<string, FewShotExample>;
   return new Map(CLASSES.map((c) => [c, raw[c]!]));
 })();
 
