@@ -285,6 +285,15 @@ export class SqliteRepository {
     this.logger.info('SQLite database closed');
   }
 
+  /**
+   * Expose the underlying connection for adjacent repositories
+   * (e.g. RepoStateRepository, FeedbackRepository) that share the DB file.
+   * Avoids opening multiple connections to the same SQLite file.
+   */
+  getConnection(): Database.Database {
+    return this.db;
+  }
+
   // -- Row Mappers --
 
   private mapRowToJob(row: Record<string, unknown>): IngestionJob {

@@ -16,7 +16,7 @@
 
 import { createLogger, metrics } from '@ekg/shared';
 import type { Logger, IngestionJob, ParseResult } from '@ekg/shared';
-import { SqliteRepository } from '@ekg/storage';
+import { SqliteRepository, RepoStateRepository } from '@ekg/storage';
 import { GraphRepository } from '@ekg/graph';
 import { Neo4jClient } from '@ekg/graph';
 import { ExtractionPipeline } from '@ekg/extractor';
@@ -62,6 +62,7 @@ export class IngestionService {
   private readonly extractor: ImportExtractor;
   private readonly graphRepo: GraphRepository;
   private readonly sqliteRepo: SqliteRepository;
+  private readonly repoStateRepo: RepoStateRepository;
   private readonly embeddingsService?: EmbeddingsService;
   private readonly searchIndexService?: SearchIndexService;
   private readonly logger: Logger;
@@ -80,6 +81,7 @@ export class IngestionService {
     this.extractor = new ImportExtractor();
     this.graphRepo = new GraphRepository(neo4jClient);
     this.sqliteRepo = sqliteRepo;
+    this.repoStateRepo = new RepoStateRepository(sqliteRepo.getConnection());
     this.embeddingsService = embeddingsService;
     this.searchIndexService = searchIndexService;
     this.logger = createLogger({ service: 'ingestion-service' });
@@ -145,6 +147,7 @@ export class IngestionService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.sqliteRepo.updateJobStatus(job.id, 'FAILED', { error: errorMessage });
+      this.recordRepoState(options.repoUrl, undefined, errorMessage);
       this.logger.error({ jobId: job.id, error: errorMessage }, 'Ingestion failed');
       metrics.inc('ingest.failed');
       metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'FAILED' });
@@ -155,6 +158,7 @@ export class IngestionService {
         metrics.inc('ingest.success');
         metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'COMPLETED' });
         metrics.inc('ingest.files_processed', final.filesProcessed);
+        this.recordRepoState(options.repoUrl, final.commitSha, undefined);
       }
     }
   }
@@ -392,6 +396,7 @@ export class IngestionService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.sqliteRepo.updateJobStatus(cloned.jobId, 'FAILED', { error: errorMessage });
+      this.recordRepoState(options.repoUrl, undefined, errorMessage);
       this.logger.error({ jobId: cloned.jobId, error: errorMessage }, 'Ingestion failed');
       metrics.inc('ingest.failed');
       metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'FAILED' });
@@ -402,7 +407,22 @@ export class IngestionService {
         metrics.inc('ingest.success');
         metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'COMPLETED' });
         metrics.inc('ingest.files_processed', final.filesProcessed);
+        this.recordRepoState(options.repoUrl, final.commitSha, undefined);
       }
+    }
+  }
+
+  /** Phase 4 freshness — record per-repo state after each ingest attempt. */
+  private recordRepoState(repoUrl: string, sha: string | undefined, errorMessage: string | undefined): void {
+    try {
+      if (errorMessage) {
+        this.repoStateRepo.upsertOnFailure(repoUrl, errorMessage);
+      } else if (sha) {
+        this.repoStateRepo.upsertOnSuccess(repoUrl, sha);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn({ repoUrl, err: msg }, 'failed to record repo_state');
     }
   }
 

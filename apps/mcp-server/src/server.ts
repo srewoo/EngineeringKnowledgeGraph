@@ -34,6 +34,10 @@ import { registerGetMetricsTool } from './tools/get-metrics.tool.js';
 import { registerSearchSemanticTool } from './tools/search-semantic.tool.js';
 import { registerAskQuestionTool } from './tools/ask-question.tool.js';
 import { registerAnswerQuestionTool } from './tools/answer-question.tool.js';
+import { registerDataFreshnessTool } from './tools/data-freshness.tool.js';
+import { registerIngestOnPushTool } from './tools/ingest-on-push.tool.js';
+import { registerSubmitFeedbackTool } from './tools/submit-feedback.tool.js';
+import { registerEvalRunTool } from './tools/eval-run.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -114,6 +118,15 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
     logger.warn('ask_question / answer_question tools not registered: searchTextRepo missing');
   }
 
+  // Phase 4 — observability, freshness, feedback, eval.
+  registerDataFreshnessTool(server, deps.sqliteRepo);
+  registerIngestOnPushTool(server, {
+    ingestionService: deps.ingestionService,
+    token: deps.gitlabConfig.token,
+  });
+  registerSubmitFeedbackTool(server, deps.sqliteRepo);
+  registerEvalRunTool(server);
+
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);
   registerMetricsResource(server, deps.neo4jClient);
@@ -123,7 +136,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 18 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 22 tools, 4 resources, 2 prompts');
 
   return server;
 }

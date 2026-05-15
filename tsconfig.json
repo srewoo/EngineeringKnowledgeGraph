@@ -29,6 +29,8 @@
     { "path": "packages/search" },
     { "path": "packages/router" },
     { "path": "packages/agent" },
+    { "path": "packages/observability" },
+    { "path": "packages/eval" },
     { "path": "apps/worker" },
     { "path": "apps/mcp-server" }
   ],

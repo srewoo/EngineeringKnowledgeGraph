@@ -1,5 +1,5 @@
 {
-  "name": "@ekg/agent",
+  "name": "@ekg/observability",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,14 +13,11 @@
   "dependencies": {
     "@ekg/shared": "*",
     "@ekg/storage": "*",
-    "@ekg/embeddings": "*",
-    "@ekg/search": "*",
-    "@ekg/router": "*",
-    "@ekg/graph": "*",
-    "@ekg/observability": "*",
+    "better-sqlite3": "^11.7.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
   }

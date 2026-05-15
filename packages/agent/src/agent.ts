@@ -30,6 +30,17 @@ import {
   type Answer,
 } from './answer.contract.js';
 import { AGENT_DEFAULT_MAX_TOKENS, AGENT_DEFAULT_TOOL_ITERATIONS } from './factory.js';
+import {
+  startTrace,
+  attachClassification,
+  attachPlannerDecision,
+  attachToolCall as traceAttachToolCall,
+  attachAnswer,
+  attachRefusal,
+  attachUsage,
+  endTrace,
+  type QueryTrace,
+} from '@ekg/observability';
 
 export interface AskOptions {
   readonly repo?: string;
@@ -56,6 +67,8 @@ export interface AnswerEnvelope {
   readonly trace: readonly ToolCallTrace[];
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly iterations: number };
   readonly promptVersions: { readonly base: string; readonly perClass: string };
+  /** Phase 4 observability id — correlates this answer to the structured Pino trace. */
+  readonly traceId: string;
 }
 
 export interface AgentDeps {
@@ -80,9 +93,17 @@ export class Agent {
     const maxIters = Math.max(1, Math.min(opts.maxIterations ?? AGENT_DEFAULT_TOOL_ITERATIONS, AGENT_DEFAULT_TOOL_ITERATIONS));
     const maxTokens = Math.max(512, opts.maxTokens ?? AGENT_DEFAULT_MAX_TOKENS);
 
+    const queryTrace = startTrace(trimmed);
     const cls = classify(trimmed);
+    attachClassification(queryTrace, { class: cls.class, confidence: cls.confidence });
     const strategy = selectStrategy(cls.class);
     const plan = await this.runPlan(trimmed, cls.class, strategy, opts);
+    attachPlannerDecision(queryTrace, {
+      strategy: plan.strategy.kind,
+      sources: plan.sources,
+      notes: plan.notes,
+      durationMs: plan.duration_ms,
+    });
     const seen = new SeenIdSet();
     seedSeenFromPlan(seen, plan);
 
@@ -130,7 +151,7 @@ export class Agent {
           messages.push({ role: 'assistant', content: completion.content });
         }
         for (const tc of completion.toolCalls) {
-          const toolMsg = await this.runToolCall(tc, iter, seen, trace);
+          const toolMsg = await this.runToolCall(tc, iter, seen, trace, queryTrace);
           messages.push(toolMsg);
         }
         continue;
@@ -143,11 +164,11 @@ export class Agent {
         retrievalEmpty: seen.values().length === 0,
       });
       if (result.ok) {
-        return this.envelope('ok', trimmed, cls, result.answer, undefined, trace, inputTokens, outputTokens, iter, versions);
+        return this.finishEnvelope(queryTrace, 'ok', trimmed, cls, result.answer, undefined, trace, inputTokens, outputTokens, iter, versions);
       }
       validationError = result.error;
       if (result.error.startsWith('REFUSE:')) {
-        return this.envelope('refused', trimmed, cls, undefined, result.error, trace, inputTokens, outputTokens, iter, versions);
+        return this.finishEnvelope(queryTrace, 'refused', trimmed, cls, undefined, result.error, trace, inputTokens, outputTokens, iter, versions);
       }
       // One re-prompt with explicit error description, then bail.
       messages.push({ role: 'assistant', content: completion.content || '<empty>' });
@@ -159,7 +180,7 @@ export class Agent {
     }
 
     if (validationError === undefined) {
-      return this.envelope('refused', trimmed, cls, undefined, 'tool-loop exhausted before final answer', trace, inputTokens, outputTokens, iter, versions);
+      return this.finishEnvelope(queryTrace, 'refused', trimmed, cls, undefined, 'tool-loop exhausted before final answer', trace, inputTokens, outputTokens, iter, versions);
     }
 
     // Re-prompt round
@@ -176,10 +197,10 @@ export class Agent {
     const reparsed = extractJson(retry.content);
     const final = validateAnswer(reparsed, { seen, retrievalEmpty: seen.values().length === 0 });
     if (final.ok) {
-      return this.envelope('ok', trimmed, cls, final.answer, undefined, trace, inputTokens, outputTokens, iter, versions);
+      return this.finishEnvelope(queryTrace, 'ok', trimmed, cls, final.answer, undefined, trace, inputTokens, outputTokens, iter, versions);
     }
     this.logger.info({ class: cls.class, error: final.error, lastAssistantText }, 'agent refused after re-prompt');
-    return this.envelope('refused', trimmed, cls, undefined, final.error, trace, inputTokens, outputTokens, iter, versions);
+    return this.finishEnvelope(queryTrace, 'refused', trimmed, cls, undefined, final.error, trace, inputTokens, outputTokens, iter, versions);
   }
 
   private async runPlan(
@@ -214,33 +235,39 @@ export class Agent {
     turn: number,
     seen: SeenIdSet,
     trace: ToolCallTrace[],
+    queryTrace?: QueryTrace,
   ): Promise<Message> {
     const t0 = Date.now();
     const r = await this.deps.tools.invoke(tc.name, tc.arguments);
     const latencyMs = Date.now() - t0;
     if (!r.ok || !r.result) {
+      const summary = truncate(r.error ?? 'unknown error', SUMMARY_CAP);
       trace.push({
         turn, toolName: tc.name, args: tc.arguments,
-        resultSummary: truncate(r.error ?? 'unknown error', SUMMARY_CAP),
+        resultSummary: summary,
         latencyMs, ok: false,
       });
+      if (queryTrace) traceAttachToolCall(queryTrace, { turn, toolName: tc.name, ok: false, latencyMs, summary });
       return {
         role: 'tool', toolCallId: tc.id, toolName: tc.name,
         content: `error: ${r.error ?? 'unknown error'}`, isError: true,
       };
     }
     for (const id of r.result.seenIds) seen.add(id);
+    const summary = truncate(r.result.text, SUMMARY_CAP);
     trace.push({
       turn, toolName: tc.name, args: tc.arguments,
-      resultSummary: truncate(r.result.text, SUMMARY_CAP),
+      resultSummary: summary,
       latencyMs, ok: true,
     });
+    if (queryTrace) traceAttachToolCall(queryTrace, { turn, toolName: tc.name, ok: true, latencyMs, summary });
     return {
       role: 'tool', toolCallId: tc.id, toolName: tc.name, content: r.result.text,
     };
   }
 
-  private envelope(
+  private finishEnvelope(
+    queryTrace: QueryTrace,
     status: AnswerEnvelope['status'],
     question: string,
     cls: { class: QuestionClass; confidence: number },
@@ -252,6 +279,14 @@ export class Agent {
     iterations: number,
     promptVersions: { base: string; perClass: string },
   ): AnswerEnvelope {
+    if (answer) {
+      attachAnswer(queryTrace, { confidence: answer.confidence, citations: answer.citations.length });
+    }
+    if (refusedReason) {
+      attachRefusal(queryTrace, refusedReason);
+    }
+    attachUsage(queryTrace, inputTokens, outputTokens);
+    endTrace(queryTrace);
     return {
       status,
       question,
@@ -261,6 +296,7 @@ export class Agent {
       trace,
       usage: { inputTokens, outputTokens, iterations },
       promptVersions,
+      traceId: queryTrace.traceId,
     };
   }
 }

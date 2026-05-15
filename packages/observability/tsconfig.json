@@ -7,12 +7,7 @@
   },
   "references": [
     { "path": "../shared" },
-    { "path": "../storage" },
-    { "path": "../embeddings" },
-    { "path": "../search" },
-    { "path": "../router" },
-    { "path": "../graph" },
-    { "path": "../observability" }
+    { "path": "../storage" }
   ],
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "test"]

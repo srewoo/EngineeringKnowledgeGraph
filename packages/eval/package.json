@@ -1,9 +1,12 @@
 {
-  "name": "@ekg/agent",
+  "name": "@ekg/eval",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "ekg-eval": "./dist/cli.js"
+  },
   "scripts": {
     "build": "tsc --build",
     "test": "vitest run",
@@ -12,12 +15,10 @@
   },
   "dependencies": {
     "@ekg/shared": "*",
-    "@ekg/storage": "*",
-    "@ekg/embeddings": "*",
-    "@ekg/search": "*",
+    "@ekg/agent": "*",
     "@ekg/router": "*",
-    "@ekg/graph": "*",
-    "@ekg/observability": "*",
+    "@ekg/search": "*",
+    "@ekg/storage": "*",
     "zod": "^3.24.0"
   },
   "devDependencies": {

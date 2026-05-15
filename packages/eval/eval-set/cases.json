@@ -1,0 +1,51 @@
+[
+  { "id": "topo-001", "question": "What services depend on person-service?", "expectedClass": "topology", "goldCitations": ["Service:person-service"], "tags": ["paper-cut"] },
+  { "id": "topo-002", "question": "Which services use the auth-service?", "expectedClass": "topology", "goldCitations": ["Service:auth-service"] },
+  { "id": "topo-003", "question": "Reverse dependencies of billing-core?", "expectedClass": "topology", "goldCitations": ["Service:billing-core"] },
+  { "id": "topo-004", "question": "What services call the notification gateway?", "expectedClass": "topology", "goldCitations": ["Service:notification-gateway"] },
+
+  { "id": "sch-001", "question": "Which table column marks a person internal vs external?", "expectedClass": "schema", "goldCitations": ["Table:Person", "Column:Person.is_internal"], "tags": ["hard"] },
+  { "id": "sch-002", "question": "What database is used by reporting-service?", "expectedClass": "schema", "goldCitations": ["Service:reporting-service", "Database:reporting"] },
+  { "id": "sch-003", "question": "Which migration added the locale column to users?", "expectedClass": "schema", "goldCitations": ["Migration:20240612_add_user_locale", "Table:User", "Column:User.locale"] },
+  { "id": "sch-004", "question": "What schema does the orders table belong to?", "expectedClass": "schema", "goldCitations": ["Table:orders"] },
+
+  { "id": "code-001", "question": "Where do we calculate proficiency score?", "expectedClass": "code", "goldCitations": ["repo:person-service:src/scoring/proficiency.ts:24-78"], "tags": ["paper-cut"] },
+  { "id": "code-002", "question": "How is JWT token verification implemented?", "expectedClass": "code", "goldCitations": ["repo:auth-service:src/middleware/jwt.ts:12-60"] },
+  { "id": "code-003", "question": "Which function handles webhook deduplication?", "expectedClass": "code", "goldCitations": ["repo:notification-gateway:src/dedupe.ts:1-44"] },
+  { "id": "code-004", "question": "Where is the rate limiter defined?", "expectedClass": "code", "goldCitations": ["repo:gateway:src/middleware/rate-limit.ts:5-90"] },
+
+  { "id": "flow-001", "question": "What happens end-to-end when a learner starts a course?", "expectedClass": "flow", "goldCitations": ["Service:learning-service", "Service:progress-service", "API:POST /api/v1/courses/start"], "tags": ["hard"] },
+  { "id": "flow-002", "question": "End-to-end flow when a user submits a quiz?", "expectedClass": "flow", "goldCitations": ["API:POST /api/v1/quizzes/submit", "Service:scoring-service"] },
+  { "id": "flow-003", "question": "What happens when a user signs in via SSO?", "expectedClass": "flow", "goldCitations": ["Service:auth-service", "API:POST /api/v1/auth/sso/callback"] },
+  { "id": "flow-004", "question": "User flow when an admin invites a colleague?", "expectedClass": "flow", "goldCitations": ["API:POST /api/v1/invites", "Service:notification-gateway"] },
+
+  { "id": "own-001", "question": "Who owns the AI prompt store?", "expectedClass": "ownership", "goldCitations": ["Service:ai-prompt-store", "Team:platform-ai"] },
+  { "id": "own-002", "question": "Which team maintains the billing core?", "expectedClass": "ownership", "goldCitations": ["Service:billing-core", "Team:billing"] },
+  { "id": "own-003", "question": "Who is the maintainer of the search index pipeline?", "expectedClass": "ownership", "goldCitations": ["Service:search-indexer", "Team:search"] },
+  { "id": "own-004", "question": "What team owns notifications?", "expectedClass": "ownership", "goldCitations": ["Service:notification-gateway", "Team:messaging"] },
+
+  { "id": "api-001", "question": "Which endpoint creates a coaching session?", "expectedClass": "api", "goldCitations": ["API:POST /api/v1/coaching/sessions"] },
+  { "id": "api-002", "question": "Which REST endpoint lists active learners?", "expectedClass": "api", "goldCitations": ["API:GET /api/v1/learners?status=active"] },
+  { "id": "api-003", "question": "Which OpenAPI route updates a course?", "expectedClass": "api", "goldCitations": ["API:PATCH /api/v1/courses/{id}"] },
+  { "id": "api-004", "question": "Which GraphQL mutation creates a feedback entry?", "expectedClass": "api", "goldCitations": ["API:Mutation.createFeedback"] },
+
+  { "id": "cfg-001", "question": "Which env var controls Snowflake credentials?", "expectedClass": "config", "goldCitations": ["ConfigKey:SNOWFLAKE_PASSWORD", "ConfigKey:SNOWFLAKE_USER"] },
+  { "id": "cfg-002", "question": "Which feature flag toggles the new dashboard?", "expectedClass": "config", "goldCitations": ["FeatureFlag:new_dashboard_enabled"] },
+  { "id": "cfg-003", "question": "Where is the JWT secret configured?", "expectedClass": "config", "goldCitations": ["ConfigKey:JWT_SECRET", "Service:auth-service"] },
+  { "id": "cfg-004", "question": "What env variable sets the Kafka broker list?", "expectedClass": "config", "goldCitations": ["ConfigKey:KAFKA_BROKERS"] },
+
+  { "id": "ops-001", "question": "Which Kafka topics does callAI consume?", "expectedClass": "ops", "goldCitations": ["Service:callai", "Topic:calls.transcription.completed"] },
+  { "id": "ops-002", "question": "Which services produce to the orders.created topic?", "expectedClass": "ops", "goldCitations": ["Topic:orders.created", "Service:order-service"] },
+  { "id": "ops-003", "question": "What queue does the email-worker consume?", "expectedClass": "ops", "goldCitations": ["Service:email-worker", "Queue:email.outgoing"] },
+  { "id": "ops-004", "question": "Which consumer groups are attached to user.signups?", "expectedClass": "ops", "goldCitations": ["Topic:user.signups", "ConsumerGroup:onboarding"] },
+
+  { "id": "hist-001", "question": "When did we add internal/external classification?", "expectedClass": "history", "goldCitations": ["Commit:9f31a0c", "Migration:20240412_add_is_internal"] },
+  { "id": "hist-002", "question": "When was the SSO endpoint first introduced?", "expectedClass": "history", "goldCitations": ["Commit:a12c901", "API:POST /api/v1/auth/sso/callback"] },
+  { "id": "hist-003", "question": "History of the rate limiter changes?", "expectedClass": "history", "goldCitations": ["repo:gateway:src/middleware/rate-limit.ts"] },
+  { "id": "hist-004", "question": "When did we first add Snowflake support?", "expectedClass": "history", "goldCitations": ["Commit:bb44ff2", "ConfigKey:SNOWFLAKE_USER"] },
+
+  { "id": "topo-005", "question": "What services depend on the analytics core?", "expectedClass": "topology", "goldCitations": ["Service:analytics-core"] },
+  { "id": "code-005", "question": "Where is password hashing implemented?", "expectedClass": "code", "goldCitations": ["repo:auth-service:src/crypto/hash.ts:1-30"] },
+  { "id": "api-005", "question": "Which endpoint deletes a coaching session?", "expectedClass": "api", "goldCitations": ["API:DELETE /api/v1/coaching/sessions/{id}"] },
+  { "id": "ops-005", "question": "Which kafka topic carries learner progress events?", "expectedClass": "ops", "goldCitations": ["Topic:learner.progress.updated"] }
+]

@@ -7,12 +7,10 @@
   },
   "references": [
     { "path": "../shared" },
-    { "path": "../storage" },
-    { "path": "../embeddings" },
-    { "path": "../search" },
+    { "path": "../agent" },
     { "path": "../router" },
-    { "path": "../graph" },
-    { "path": "../observability" }
+    { "path": "../search" },
+    { "path": "../storage" }
   ],
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "test"]
