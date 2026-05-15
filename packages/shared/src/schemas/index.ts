@@ -222,6 +222,31 @@ export const typeDefNodeSchema = z.object({
   sourceLine: z.number().int().nonnegative(),
 });
 
+// -- Ownership / Commit Schemas (Phase 1.7) --
+
+export const ownerKindSchema = z.enum(['user', 'team', 'email']);
+
+export const ownerNodeSchema = z.object({
+  identifier: z.string().min(1),
+  kind: ownerKindSchema,
+  repoUrl: z.string().min(1),
+});
+
+export const teamNodeSchema = z.object({
+  name: z.string().min(1),
+  repoUrl: z.string().min(1),
+});
+
+export const commitNodeSchema = z.object({
+  sha: z.string().min(1),
+  repoUrl: z.string().min(1),
+  author: z.string(),
+  authorEmail: z.string(),
+  message: z.string().max(500),
+  authoredAt: z.string(),
+  parentShas: z.array(z.string()),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;

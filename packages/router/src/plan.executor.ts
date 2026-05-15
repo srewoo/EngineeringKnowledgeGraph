@@ -71,11 +71,11 @@ export async function executePlan(
 
   try {
     if (strategy.kind === 'graph-only') {
-      const graph = await runGraph(strategy.cypher, serviceNames, deps, logger);
+      const graph = await runGraph(strategy.cypher, serviceNames, question, deps, logger);
       sources.push(`graph:${strategy.cypher ?? 'unknown'}`);
       mut(result).results = { graph };
-      if (strategy.cypher === 'commits') {
-        notes.push('Commit nodes are not in the graph yet (Phase 1.7 placeholder).');
+      if (strategy.cypher === 'commits' && graph.length === 0) {
+        notes.push('No commits found — set EKG_GIT_HISTORY_ENABLED=true and re-ingest to populate Commit nodes.');
       }
     } else if (strategy.kind === 'hybrid') {
       const hybrid = await runHybrid(question, strategy.label, opts.repoUrl, k, deps, logger);
@@ -130,12 +130,31 @@ export async function executePlan(
 async function runGraph(
   key: CypherTemplateKey | undefined,
   serviceNames: readonly string[],
+  question: string,
   deps: PlanExecutorDeps,
   logger: Logger,
 ): Promise<readonly Record<string, unknown>[]> {
   if (!key) return [];
   const tpl = getTemplate(key);
-  return runGraphRaw(tpl.cypher, { serviceNames: serviceNames.map((s) => s.toLowerCase()) }, deps, logger);
+  const params: Record<string, unknown> = {
+    serviceNames: serviceNames.map((s) => s.toLowerCase()),
+  };
+  if (key === 'commits') {
+    params['entity'] = extractFilePathHint(question);
+  }
+  return runGraphRaw(tpl.cypher, params, deps, logger);
+}
+
+/**
+ * Pull a file-path-shaped token out of a history question, e.g.
+ * "when did we change apps/web/src/index.ts?" → "apps/web/src/index.ts".
+ * Returns "" when nothing matches — the template tolerates an empty entity
+ * and falls back to the service-name path.
+ */
+function extractFilePathHint(question: string): string {
+  // Match tokens that look like a/b/c or a/b/c.ext
+  const m = question.match(/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,}/);
+  return m ? m[0] : '';
 }
 
 async function runGraphRaw(

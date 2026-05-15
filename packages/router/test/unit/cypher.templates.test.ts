@@ -59,8 +59,14 @@ describe('cypher templates', () => {
     expect(c).toMatch(/CONSUMES/);
   });
 
-  it('commits is a placeholder returning an empty list', () => {
-    expect(getTemplate('commits').cypher).toMatch(/RETURN \[\] AS commits/);
+  it('commits template references TOUCHED edges and Commit nodes', () => {
+    const c = getTemplate('commits').cypher;
+    expect(c).toMatch(/TOUCHED/);
+    expect(c).toMatch(/:Commit/);
+    expect(c).toMatch(/\$entity/);
+    expect(c).toMatch(/\$serviceNames/);
+    expect(c).toMatch(/ORDER BY c\.authoredAt DESC/);
+    expect(c).toMatch(/LIMIT 20/);
   });
 
   it('all templates parameterise inputs (no string concat)', () => {

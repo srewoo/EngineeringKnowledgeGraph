@@ -18,3 +18,15 @@ export { GitLabClient } from './gitlab.client.js';
 export type { GitLabRepo, GitLabDiscoveryOptions } from './gitlab.client.js';
 export { GitHubClient } from './github.client.js';
 export type { GitHubDiscoveryOptions } from './github.client.js';
+export {
+  GitLogParser,
+  parseGitLogOutput,
+  DEFAULT_MAX_COMMITS,
+  DEFAULT_SINCE,
+} from './git.log.parser.js';
+export type {
+  ParsedCommit,
+  GitLogResult,
+  GitLogOptions,
+  GitFactory,
+} from './git.log.parser.js';

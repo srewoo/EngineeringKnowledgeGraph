@@ -16,6 +16,7 @@ export const NODE_LABELS: readonly NodeLabel[] = [
   'Owner', 'Team', 'Doc',
   'Table', 'Column', 'Migration',
   'Function', 'Class', 'Method', 'TypeDef',
+  'Commit',
 ] as const;
 
 // -- Relationship Types --
@@ -27,6 +28,7 @@ export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'HAS', 'ALTERS', 'RELATES_TO',
   'DEFINES', 'EXTENDS',
   'PRODUCES', 'CONSUMES', 'CALLS_API',
+  'OWNED_BY', 'TOUCHED',
 ] as const;
 
 /** Hard cap for cyclomatic complexity counting — prevents pathological files. */

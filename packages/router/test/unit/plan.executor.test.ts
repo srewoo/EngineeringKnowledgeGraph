@@ -112,13 +112,26 @@ describe('executePlan', () => {
     expect(out.results.multiHop?.hybrid).toHaveLength(1);
   });
 
-  it('history (commits) returns notes about placeholder', async () => {
-    const neo4j = makeNeo4j([{ commits: [] }]);
+  it('history (commits) hits the graph and surfaces an enable hint when empty', async () => {
+    const neo4j = makeNeo4j([]);
     const hybrid = makeHybrid([]);
     const strategy: RetrievalStrategy = { kind: 'graph-only', cypher: 'commits' };
 
-    const out = await executePlan('when did we add X?', 'history', strategy, { hybrid, neo4j });
-    expect(out.notes.join(' ')).toMatch(/Phase 1\.7/);
+    const out = await executePlan('when did apps/web/page.ts last change?', 'history', strategy, { hybrid, neo4j });
+    expect(neo4j.executeRead).toHaveBeenCalledTimes(1);
+    expect(out.notes.join(' ')).toMatch(/EKG_GIT_HISTORY_ENABLED/);
+  });
+
+  it('history (commits) returns rows when the graph has Commit data', async () => {
+    const neo4j = makeNeo4j([
+      { sha: 'abc', author: 'Jane', authorEmail: 'j@x', authoredAt: '2026-01-01', message: 'fix', files: ['x.ts'] },
+    ]);
+    const hybrid = makeHybrid([]);
+    const strategy: RetrievalStrategy = { kind: 'graph-only', cypher: 'commits' };
+
+    const out = await executePlan('history of person-service', 'history', strategy, { hybrid, neo4j });
+    expect(out.results.graph).toHaveLength(1);
+    expect(out.notes.join(' ')).not.toMatch(/EKG_GIT_HISTORY_ENABLED/);
   });
 
   it('records duration_ms', async () => {

@@ -26,6 +26,7 @@ import { RepoCloner } from './repo.cloner.js';
 import { EmbeddingsService } from './embeddings.service.js';
 import { SearchIndexService } from './search-index.service.js';
 import { UrlApiLinker } from './url.api.linker.js';
+import { HistoryPass } from './history.pass.js';
 import type { UnresolvedHttpRepository } from '@ekg/storage';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
@@ -68,6 +69,7 @@ export class IngestionService {
   private readonly embeddingsService?: EmbeddingsService;
   private readonly searchIndexService?: SearchIndexService;
   private readonly urlApiLinker: UrlApiLinker;
+  private readonly historyPass: HistoryPass;
   private readonly logger: Logger;
 
   constructor(
@@ -89,6 +91,7 @@ export class IngestionService {
     this.embeddingsService = embeddingsService;
     this.searchIndexService = searchIndexService;
     this.urlApiLinker = new UrlApiLinker(neo4jClient, unresolvedHttpRepo);
+    this.historyPass = new HistoryPass();
     this.logger = createLogger({ service: 'ingestion-service' });
   }
 
@@ -204,6 +207,23 @@ export class IngestionService {
       }
     } catch (err) {
       this.logger.warn({ err, jobId }, 'URL→API linker failed (continuing)');
+    }
+
+    // Phase 1.7 — CODEOWNERS per-file fan-out + opt-in git history. Best-effort.
+    try {
+      const history = await this.historyPass.run({
+        repoUrl: options.repoUrl,
+        localPath,
+        nodes: extraction.nodes,
+      });
+      if (history.newNodes.length > 0) {
+        await this.graphRepo.mergeNodes(history.newNodes);
+      }
+      if (history.newRelationships.length > 0) {
+        edgesCreated += await this.graphRepo.mergeRelationships(history.newRelationships);
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'History pass failed (continuing)');
     }
 
     // Best-effort BM25 indexing — always-on, local + free.

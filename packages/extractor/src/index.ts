@@ -11,6 +11,11 @@ export { OpenApiExtractor } from './openapi.extractor.js';
 export type { OpenApiExtractionResult } from './openapi.extractor.js';
 export { SymbolsExtractor } from './symbols.extractor.js';
 export type { SymbolsExtractionResult } from './symbols.extractor.js';
+export { CodeownersExtractor, asGraphNodes as codeownersAsGraphNodes } from './codeowners.extractor.js';
+export type {
+  CodeownersExtractionInput,
+  CodeownersExtractionResult,
+} from './codeowners.extractor.js';
 export { UrlApiResolver } from './url.api.resolver.js';
 export type {
   HttpCallInput,

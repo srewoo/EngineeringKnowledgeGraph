@@ -39,7 +39,8 @@ export type NodeLabel =
   | 'Function'
   | 'Class'
   | 'Method'
-  | 'TypeDef';
+  | 'TypeDef'
+  | 'Commit';
 
 // -- Relationship Types --
 
@@ -64,7 +65,9 @@ export type RelationshipType =
   | 'EXTENDS'
   | 'PRODUCES'
   | 'CONSUMES'
-  | 'CALLS_API';
+  | 'CALLS_API'
+  | 'OWNED_BY'
+  | 'TOUCHED';
 
 // -- Base Node --
 
@@ -294,6 +297,42 @@ export interface TypeDefNode extends GraphNode {
     lineEnd: number;
     isExported: boolean;
     sourceLine: number;
+  }>;
+}
+
+// -- Ownership Nodes (Phase 1.7) --
+
+export type OwnerKind = 'user' | 'team' | 'email';
+
+export interface OwnerNode extends GraphNode {
+  readonly label: 'Owner';
+  readonly properties: Readonly<{
+    identifier: string;
+    kind: OwnerKind;
+    repoUrl: string;
+  }>;
+}
+
+export interface TeamNode extends GraphNode {
+  readonly label: 'Team';
+  readonly properties: Readonly<{
+    name: string;
+    repoUrl: string;
+  }>;
+}
+
+// -- Commit Node (Phase 1.7) --
+
+export interface CommitNode extends GraphNode {
+  readonly label: 'Commit';
+  readonly properties: Readonly<{
+    sha: string;
+    repoUrl: string;
+    author: string;
+    authorEmail: string;
+    message: string;
+    authoredAt: string;
+    parentShas: readonly string[];
   }>;
 }
 

@@ -89,12 +89,32 @@ const TEMPLATES: Readonly<Record<CypherTemplateKey, CypherTemplate>> = Object.fr
     `.trim(),
   },
   commits: {
-    // History/Commit nodes don't exist yet (Phase 1.7). Return empty so the
-    // executor still produces a structured response.
+    // Phase 1.7 — `Commit -[TOUCHED]-> File` edges populated when
+    // EKG_GIT_HISTORY_ENABLED=true. Resolves an entity (file path or service
+    // name) to recent commits. If $entity matches a service, expand to the
+    // files it CONTAINS; otherwise treat $entity as a file-path substring.
     key: 'commits',
-    description: 'Placeholder — Commit nodes not in graph yet (Phase 1.7).',
+    description: 'Recent commits TOUCHing a file or any file under a service.',
     cypher: `
-      RETURN [] AS commits LIMIT 1
+      OPTIONAL MATCH (svc:Service)
+        WHERE toLower(svc.name) IN $serviceNames
+      OPTIONAL MATCH (svc)-[:CONTAINS]->(svcFile:File)
+      WITH collect(DISTINCT svcFile) AS svcFiles
+      OPTIONAL MATCH (f:File)
+        WHERE $entity <> '' AND toLower(f.path) CONTAINS toLower($entity)
+      WITH svcFiles + collect(DISTINCT f) AS allFiles
+      UNWIND allFiles AS target
+      WITH DISTINCT target WHERE target IS NOT NULL
+      MATCH (c:Commit)-[:TOUCHED]->(target)
+      WITH c, collect(DISTINCT target.path) AS files
+      RETURN c.sha AS sha,
+             c.author AS author,
+             c.authorEmail AS authorEmail,
+             c.authoredAt AS authoredAt,
+             c.message AS message,
+             files
+      ORDER BY c.authoredAt DESC
+      LIMIT 20
     `.trim(),
   },
 });
