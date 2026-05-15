@@ -30,7 +30,8 @@ export type NodeLabel =
   | 'Feature'
   | 'TestCase'
   | 'Owner'
-  | 'Team';
+  | 'Team'
+  | 'Doc';
 
 // -- Relationship Types --
 
@@ -46,7 +47,8 @@ export type RelationshipType =
   | 'IMPLEMENTS'
   | 'TESTS'
   | 'OWNS'
-  | 'MEMBER_OF';
+  | 'MEMBER_OF'
+  | 'DOCUMENTED_BY';
 
 // -- Base Node --
 
@@ -109,6 +111,41 @@ export interface RepoNode extends GraphNode {
     url: string;
     branch: string;
     lastCommitSha: string;
+  }>;
+}
+
+// -- Doc Nodes --
+
+export type DocKind = 'README' | 'RUNBOOK' | 'ADR' | 'CHANGELOG' | 'PRD' | 'OTHER';
+
+export interface DocHeading {
+  readonly level: number;
+  readonly text: string;
+}
+
+export interface CodeBlock {
+  readonly language: string;
+  readonly code: string;
+  readonly startLine: number;
+}
+
+export interface DocLink {
+  readonly text: string;
+  readonly url: string;
+}
+
+export interface DocNode extends GraphNode {
+  readonly label: 'Doc';
+  readonly properties: Readonly<{
+    path: string;
+    repoUrl: string;
+    kind: DocKind;
+    title: string;
+    headings: readonly DocHeading[];
+    rawText: string;
+    codeBlockCount: number;
+    linkCount: number;
+    format: 'markdown' | 'mdx' | 'rst' | 'adoc';
   }>;
 }
 

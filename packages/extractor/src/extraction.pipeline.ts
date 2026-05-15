@@ -7,7 +7,8 @@
  */
 
 import { extname } from 'node:path';
-import { createLogger } from '@ekg/shared';
+import { readFile } from 'node:fs/promises';
+import { createLogger, DOC_EXTENSIONS } from '@ekg/shared';
 import {
   FileScanner,
   ConfigScanner,
@@ -20,6 +21,7 @@ import type { CodeOwnerRule } from '@ekg/parser';
 import type { GraphNode, GraphRelationship, ExtractionResult, EkgConfig, Logger } from '@ekg/shared';
 import { ImportExtractor } from './import.extractor.js';
 import { ServiceDetector } from './service.detector.js';
+import { MarkdownExtractor } from './markdown.extractor.js';
 
 const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -32,6 +34,7 @@ export class ExtractionPipeline {
   private readonly multiParser: MultiLanguageParser;
   private readonly importExtractor: ImportExtractor;
   private readonly serviceDetector: ServiceDetector;
+  private readonly markdownExtractor: MarkdownExtractor;
   private readonly logger: Logger;
 
   constructor() {
@@ -43,6 +46,7 @@ export class ExtractionPipeline {
     this.multiParser = new MultiLanguageParser();
     this.importExtractor = new ImportExtractor();
     this.serviceDetector = new ServiceDetector();
+    this.markdownExtractor = new MarkdownExtractor();
     this.logger = createLogger({ service: 'extraction-pipeline' });
   }
 
@@ -108,19 +112,37 @@ export class ExtractionPipeline {
       const batch = files.slice(i, i + concurrency);
       const parsed = await Promise.all(batch.map(async (file) => {
         const ext = extname(file.absolutePath).toLowerCase();
+        if (DOC_EXTENSIONS.has(ext)) {
+          return { kind: 'doc' as const, ext };
+        }
         if (TS_EXTENSIONS.has(ext)) {
-          return this.tsPool.parseFile(file.absolutePath);
+          const r = await this.tsPool.parseFile(file.absolutePath);
+          return r ? { kind: 'code' as const, result: r } : undefined;
         }
         if (MultiLanguageParser.handles(ext)) {
-          return this.multiParser.parseFile(file.absolutePath);
+          const r = await this.multiParser.parseFile(file.absolutePath);
+          return r ? { kind: 'code' as const, result: r } : undefined;
         }
         return undefined;
       }));
 
       for (let j = 0; j < parsed.length; j++) {
-        const result = parsed[j];
+        const entry = parsed[j];
         const file = batch[j]!;
-        if (!result) continue;
+        if (!entry) continue;
+
+        if (entry.kind === 'doc') {
+          await this.handleDocFile(
+            file,
+            repoUrl,
+            servicesByDirLen,
+            allNodes,
+            allRelationships,
+          );
+          continue;
+        }
+
+        const result = entry.result;
         const extraction = this.importExtractor.extract(result, repoUrl);
 
         // Enrich File nodes with size, LOC, repo + per-file last-changed metadata
@@ -317,6 +339,51 @@ export class ExtractionPipeline {
       if (!seen.has(key)) seen.set(key, rel);
     }
     return [...seen.values()];
+  }
+
+  /**
+   * Read a doc file from disk, run MarkdownExtractor, and emit Doc nodes
+   * plus Repo→Doc (CONTAINS) and Service→Doc (DOCUMENTED_BY) edges.
+   */
+  private async handleDocFile(
+    file: { absolutePath: string; relativePath: string },
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    let content: string;
+    try {
+      content = await readFile(file.absolutePath, 'utf8');
+    } catch (err) {
+      this.logger.warn(
+        { err, path: file.relativePath },
+        'Failed to read doc file; skipping',
+      );
+      return;
+    }
+
+    const { doc } = this.markdownExtractor.extract(content, file.relativePath, repoUrl);
+    allNodes.push(doc);
+
+    allRelationships.push({
+      type: 'CONTAINS',
+      sourceId: `repo:${repoUrl}`,
+      targetId: doc.id,
+      confidence: 'HIGH',
+      properties: { source: 'doc-extractor' },
+    });
+
+    const matchingService = this.findServiceForFile(file.relativePath, servicesByDirLen);
+    if (matchingService) {
+      allRelationships.push({
+        type: 'DOCUMENTED_BY',
+        sourceId: `service:${matchingService.name}`,
+        targetId: doc.id,
+        confidence: 'HIGH',
+        properties: { source: 'doc-extractor' },
+      });
+    }
   }
 
   private extractRepoName(repoUrl: string): string {

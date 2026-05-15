@@ -82,6 +82,38 @@ export const getApiMapInputSchema = z.object({
   service: z.string().optional(),
 });
 
+// -- Doc Schemas --
+
+export const docKindSchema = z.enum(['README', 'RUNBOOK', 'ADR', 'CHANGELOG', 'PRD', 'OTHER']);
+
+export const docHeadingSchema = z.object({
+  level: z.number().int().min(1).max(6),
+  text: z.string(),
+});
+
+export const codeBlockSchema = z.object({
+  language: z.string(),
+  code: z.string(),
+  startLine: z.number().int().nonnegative(),
+});
+
+export const docLinkSchema = z.object({
+  text: z.string(),
+  url: z.string(),
+});
+
+export const docNodeSchema = z.object({
+  path: z.string().min(1),
+  repoUrl: z.string().min(1),
+  kind: docKindSchema,
+  title: z.string(),
+  headings: z.array(docHeadingSchema),
+  rawText: z.string(),
+  codeBlockCount: z.number().int().nonnegative(),
+  linkCount: z.number().int().nonnegative(),
+  format: z.enum(['markdown', 'mdx', 'rst', 'adoc']),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;

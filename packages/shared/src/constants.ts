@@ -13,7 +13,7 @@ import type { NodeLabel, RelationshipType } from './types/graph.types.js';
 export const NODE_LABELS: readonly NodeLabel[] = [
   'Service', 'API', 'Database', 'Repo', 'File',
   'Module', 'Config', 'MessageQueue', 'Feature', 'TestCase',
-  'Owner', 'Team',
+  'Owner', 'Team', 'Doc',
 ] as const;
 
 // -- Relationship Types --
@@ -21,8 +21,17 @@ export const NODE_LABELS: readonly NodeLabel[] = [
 export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'IMPORTS', 'EXPORTS', 'USES', 'CALLS', 'EXPOSES',
   'CONTAINS', 'DEPENDS_ON', 'READS_CONFIG', 'IMPLEMENTS', 'TESTS',
-  'OWNS', 'MEMBER_OF',
+  'OWNS', 'MEMBER_OF', 'DOCUMENTED_BY',
 ] as const;
+
+/** Doc kinds — heuristic classification of markdown / docs files. */
+export const DOC_KINDS = ['README', 'RUNBOOK', 'ADR', 'CHANGELOG', 'PRD', 'OTHER'] as const;
+
+/** Documentation extensions — handled by MarkdownExtractor, not source parsers. */
+export const DOC_EXTENSIONS: ReadonlySet<string> = new Set(['.md', '.mdx', '.rst', '.adoc']);
+
+/** Hard cap on raw doc text retained as a node property. */
+export const MAX_DOC_TEXT_BYTES = 100 * 1024;
 
 // -- File Filtering --
 
@@ -72,6 +81,8 @@ export const DEFAULT_SUPPORTED_EXTENSIONS: readonly string[] = [
   '.json', '.yaml', '.yml', '.toml', '.ini', '.env',
   // Infra
   '.tf', '.hcl',
+  // Documentation
+  '.md', '.mdx', '.rst', '.adoc',
 ] as const;
 
 /**

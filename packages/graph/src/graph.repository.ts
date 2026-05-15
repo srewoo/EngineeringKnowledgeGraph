@@ -197,6 +197,9 @@ export class GraphRepository {
         'CREATE INDEX IF NOT EXISTS FOR (n:Repo) ON (n.url)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Owner) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Team) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Doc) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Doc) ON (n.repoUrl)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Doc) ON (n.kind)',
       ];
       for (const query of indexes) {
         await session.run(query);
