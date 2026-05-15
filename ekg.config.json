@@ -19,5 +19,43 @@
     "__tests__",
     "test"
   ],
-  "supportedExtensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
+  "supportedExtensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+  "mcpAdapters": [
+    {
+      "id": "datadog",
+      "enabled": false,
+      "transport": "stdio",
+      "env": { "DD_API_KEY": "${DD_API_KEY}", "DD_APP_KEY": "${DD_APP_KEY}", "DD_SITE": "${DD_SITE}" },
+      "serviceMapping": "auto",
+      "capabilities": ["metrics", "traces", "errors", "alarms"],
+      "priority": 10
+    },
+    {
+      "id": "atlassian",
+      "enabled": false,
+      "transport": "stdio",
+      "env": { "ATLASSIAN_TOKEN": "${ATLASSIAN_TOKEN}" },
+      "serviceMapping": "auto",
+      "capabilities": ["docs", "tickets"],
+      "priority": 5
+    },
+    {
+      "id": "mixpanel",
+      "enabled": false,
+      "transport": "stdio",
+      "env": { "MIXPANEL_TOKEN": "${MIXPANEL_TOKEN}" },
+      "serviceMapping": "auto",
+      "capabilities": ["usage"],
+      "priority": 5
+    },
+    {
+      "id": "loki",
+      "enabled": false,
+      "transport": "http",
+      "env": { "LOKI_URL": "${LOKI_URL}" },
+      "serviceMapping": { "field": "app", "pattern": "{service}" },
+      "capabilities": ["logs"],
+      "priority": 5
+    }
+  ]
 }

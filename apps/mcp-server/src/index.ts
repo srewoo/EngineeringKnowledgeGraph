@@ -21,6 +21,7 @@ import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
 import { SqliteRepository } from '@ekg/storage';
 import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService, SearchIndexService } from '@ekg/worker';
+import { bootstrapAdapters } from '@ekg/adapters';
 import { createMcpServer } from './server.js';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -124,6 +125,20 @@ async function main(): Promise<void> {
     gitlabUrl: env.gitlabUrl,
   }, 'Creating MCP server');
 
+  // Phase 6 — bootstrap external MCP adapters from ekg.config.json. The
+  // monorepo root is two levels above this file's package directory.
+  const repoRoot = resolve(__dirname, '..', '..', '..');
+  let adapterRegistry: import('@ekg/adapters').AdapterRegistry | undefined;
+  let runtimeRegistry: import('@ekg/advanced').RuntimeProviderRegistry | undefined;
+  try {
+    const result = await bootstrapAdapters({ configPath: repoRoot });
+    adapterRegistry = result.registry;
+    runtimeRegistry = result.runtimeRegistry;
+    log.info({ count: result.registry.size() }, 'External MCP adapters bootstrapped');
+  } catch (err) {
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'adapter bootstrap failed');
+  }
+
   const server = createMcpServer({
     neo4jClient,
     graphQueries,
@@ -133,6 +148,8 @@ async function main(): Promise<void> {
     serviceResolver,
     embeddingsService,
     searchTextRepo,
+    ...(adapterRegistry ? { adapterRegistry } : {}),
+    ...(runtimeRegistry ? { runtimeRegistry } : {}),
     gitlabConfig: {
       gitlabUrl: env.gitlabUrl,
       token: env.gitToken ?? '',

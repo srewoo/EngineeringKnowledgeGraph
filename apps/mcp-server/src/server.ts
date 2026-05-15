@@ -11,6 +11,7 @@ import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
 import { SqliteRepository, SnapshotRepository } from '@ekg/storage';
 import { RuntimeProviderRegistry } from '@ekg/advanced';
+import { AdapterRegistry, CapabilityRouter } from '@ekg/adapters';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
 import type { EmbeddingsService } from '@ekg/worker';
 import type { SearchTextRepository } from '@ekg/storage';
@@ -44,6 +45,8 @@ import { registerSynthesizeFlowTool } from './tools/synthesize-flow.tool.js';
 import { registerAnalyzeImpactV2Tool } from './tools/analyze-impact-v2.tool.js';
 import { registerSnapshotGraphTool, registerDiffSnapshotsTool } from './tools/snapshot.tools.js';
 import { registerRuntimeEvidenceTool } from './tools/runtime-evidence.tool.js';
+import { registerListAdaptersTool } from './tools/list-adapters.tool.js';
+import { registerAdapterQueryTool } from './tools/adapter-query.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -63,6 +66,7 @@ export interface ServerDependencies {
   readonly embeddingsService?: EmbeddingsService;
   readonly searchTextRepo?: SearchTextRepository;
   readonly runtimeRegistry?: RuntimeProviderRegistry;
+  readonly adapterRegistry?: AdapterRegistry;
   readonly gitlabConfig: {
     readonly gitlabUrl: string;
     readonly token: string;
@@ -143,6 +147,12 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerDiffSnapshotsTool(server, snapshotRepo);
   registerRuntimeEvidenceTool(server, runtimeRegistry);
 
+  // Phase 6 — external MCP adapter framework.
+  const adapterRegistry = deps.adapterRegistry ?? new AdapterRegistry();
+  const capabilityRouter = new CapabilityRouter(adapterRegistry);
+  registerListAdaptersTool(server, adapterRegistry);
+  registerAdapterQueryTool(server, capabilityRouter);
+
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);
   registerMetricsResource(server, deps.neo4jClient);
@@ -152,7 +162,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 27 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 29 tools, 4 resources, 2 prompts');
 
   return server;
 }

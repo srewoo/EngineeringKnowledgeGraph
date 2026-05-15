@@ -32,6 +32,7 @@
     { "path": "packages/observability" },
     { "path": "packages/eval" },
     { "path": "packages/advanced" },
+    { "path": "packages/adapters" },
     { "path": "apps/worker" },
     { "path": "apps/mcp-server" }
   ],

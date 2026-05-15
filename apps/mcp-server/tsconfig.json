@@ -16,6 +16,7 @@
     { "path": "../../packages/observability" },
     { "path": "../../packages/eval" },
     { "path": "../../packages/advanced" },
+    { "path": "../../packages/adapters" },
     { "path": "../worker" }
   ],
   "include": ["src/**/*.ts"],
