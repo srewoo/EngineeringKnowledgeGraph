@@ -11,6 +11,7 @@
     { "path": "../../packages/graph" },
     { "path": "../../packages/embeddings" },
     { "path": "../../packages/search" },
+    { "path": "../../packages/router" },
     { "path": "../worker" }
   ],
   "include": ["src/**/*.ts"],

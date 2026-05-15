@@ -27,6 +27,7 @@
     { "path": "packages/extractor" },
     { "path": "packages/embeddings" },
     { "path": "packages/search" },
+    { "path": "packages/router" },
     { "path": "apps/worker" },
     { "path": "apps/mcp-server" }
   ],
