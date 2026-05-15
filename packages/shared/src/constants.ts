@@ -15,6 +15,7 @@ export const NODE_LABELS: readonly NodeLabel[] = [
   'Module', 'Config', 'MessageQueue', 'Feature', 'TestCase',
   'Owner', 'Team', 'Doc',
   'Table', 'Column', 'Migration',
+  'Function', 'Class', 'Method', 'TypeDef',
 ] as const;
 
 // -- Relationship Types --
@@ -24,7 +25,11 @@ export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'CONTAINS', 'DEPENDS_ON', 'READS_CONFIG', 'IMPLEMENTS', 'TESTS',
   'OWNS', 'MEMBER_OF', 'DOCUMENTED_BY',
   'HAS', 'ALTERS', 'RELATES_TO',
+  'DEFINES', 'EXTENDS',
 ] as const;
+
+/** Hard cap for cyclomatic complexity counting — prevents pathological files. */
+export const MAX_CYCLOMATIC_COMPLEXITY = 50;
 
 /** Doc kinds — heuristic classification of markdown / docs files. */
 export const DOC_KINDS = ['README', 'RUNBOOK', 'ADR', 'CHANGELOG', 'PRD', 'OTHER'] as const;

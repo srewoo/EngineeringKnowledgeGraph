@@ -9,3 +9,5 @@ export { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
 export type { PrismaExtractionResult, PrismaIndex } from './schema.prisma.extractor.js';
 export { OpenApiExtractor } from './openapi.extractor.js';
 export type { OpenApiExtractionResult } from './openapi.extractor.js';
+export { SymbolsExtractor } from './symbols.extractor.js';
+export type { SymbolsExtractionResult } from './symbols.extractor.js';

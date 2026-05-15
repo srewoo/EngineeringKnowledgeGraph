@@ -14,6 +14,7 @@
 
 import { Project, SyntaxKind, type SourceFile } from 'ts-morph';
 import { createLogger } from '@ekg/shared';
+import { TypeScriptSymbolsParser } from './typescript.symbols.parser.js';
 import {
   DATABASE_SDK_MAP,
   HTTP_CLIENT_PACKAGES,
@@ -32,6 +33,7 @@ import type {
 export class TypeScriptParser {
   private readonly project: Project;
   private readonly logger: Logger;
+  private readonly symbolsParser: TypeScriptSymbolsParser;
 
   constructor() {
     this.logger = createLogger({ service: 'typescript-parser' });
@@ -44,6 +46,7 @@ export class TypeScriptParser {
       },
       skipAddingFilesFromTsConfig: true,
     });
+    this.symbolsParser = new TypeScriptSymbolsParser();
   }
 
   /**
@@ -65,6 +68,9 @@ export class TypeScriptParser {
       const httpCalls = this.extractHttpCalls(sourceFile, imports);
       const databaseUsages = this.extractDatabaseUsages(imports);
       const envVars = this.extractEnvVars(sourceFile);
+      // Symbol-level extraction (Phase 1.3). Ids are scoped to filePath here;
+      // the extractor re-prefixes with repoUrl when building graph nodes.
+      const symbols = this.symbolsParser.extract(sourceFile, filePath, filePath, imports);
 
       this.logger.debug({
         filePath,
@@ -74,10 +80,14 @@ export class TypeScriptParser {
         httpCalls: httpCalls.length,
         dbUsages: databaseUsages.length,
         envVars: envVars.length,
+        functions: symbols.functions.length,
+        classes: symbols.classes.length,
+        methods: symbols.methods.length,
+        typeDefs: symbols.typeDefs.length,
       }, 'File parsed successfully');
 
       const loc = sourceFile.getFullText().split('\n').length;
-      return { filePath, imports, exports, routes, httpCalls, databaseUsages, envVars, loc };
+      return { filePath, imports, exports, routes, httpCalls, databaseUsages, envVars, loc, symbols };
     } finally {
       this.project.removeSourceFile(sourceFile);
     }

@@ -24,6 +24,7 @@ import { ServiceDetector } from './service.detector.js';
 import { MarkdownExtractor } from './markdown.extractor.js';
 import { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
 import { OpenApiExtractor } from './openapi.extractor.js';
+import { SymbolsExtractor } from './symbols.extractor.js';
 
 const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -39,6 +40,7 @@ export class ExtractionPipeline {
   private readonly markdownExtractor: MarkdownExtractor;
   private readonly prismaExtractor: SchemaPrismaExtractor;
   private readonly openApiExtractor: OpenApiExtractor;
+  private readonly symbolsExtractor: SymbolsExtractor;
   private readonly logger: Logger;
 
   constructor() {
@@ -53,6 +55,7 @@ export class ExtractionPipeline {
     this.markdownExtractor = new MarkdownExtractor();
     this.prismaExtractor = new SchemaPrismaExtractor();
     this.openApiExtractor = new OpenApiExtractor();
+    this.symbolsExtractor = new SymbolsExtractor();
     this.logger = createLogger({ service: 'extraction-pipeline' });
   }
 
@@ -178,6 +181,22 @@ export class ExtractionPipeline {
 
         allNodes.push(...extraction.nodes);
         allRelationships.push(...extraction.relationships);
+
+        // Symbol-level extraction (Phase 1.3) — TS/JS only. The parser only
+        // populates `symbols` for files it owns; multi-language parsers leave
+        // it undefined, so this is a no-op for everyone else.
+        if (result.symbols) {
+          const fileNode = extraction.nodes.find((n) => n.label === 'File');
+          const language = (fileNode?.properties as { language?: string } | undefined)?.language ?? 'unknown';
+          const symResult = this.symbolsExtractor.extract(
+            result.symbols,
+            repoUrl,
+            result.filePath,
+            language,
+          );
+          allNodes.push(...symResult.nodes);
+          allRelationships.push(...symResult.relationships);
+        }
 
         const matchingService = this.findServiceForFile(file.relativePath, servicesByDirLen);
         if (matchingService) {

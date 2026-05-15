@@ -34,7 +34,11 @@ export type NodeLabel =
   | 'Doc'
   | 'Table'
   | 'Column'
-  | 'Migration';
+  | 'Migration'
+  | 'Function'
+  | 'Class'
+  | 'Method'
+  | 'TypeDef';
 
 // -- Relationship Types --
 
@@ -54,7 +58,9 @@ export type RelationshipType =
   | 'DOCUMENTED_BY'
   | 'HAS'
   | 'ALTERS'
-  | 'RELATES_TO';
+  | 'RELATES_TO'
+  | 'DEFINES'
+  | 'EXTENDS';
 
 // -- Base Node --
 
@@ -203,6 +209,76 @@ export interface MigrationNode extends GraphNode {
     filePath: string;
     repoUrl: string;
     appliedAt?: string;
+  }>;
+}
+
+// -- Symbol Nodes (function-level extraction, Phase 1.3) --
+
+export type TypeDefKind = 'interface' | 'type-alias' | 'enum';
+export type MethodVisibility = 'public' | 'private' | 'protected';
+
+export interface FunctionNode extends GraphNode {
+  readonly label: 'Function';
+  readonly properties: Readonly<{
+    name: string;
+    repoUrl: string;
+    filePath: string;
+    language: string;
+    signature: string;
+    docComment?: string;
+    lineStart: number;
+    lineEnd: number;
+    isExported: boolean;
+    isAsync: boolean;
+    complexity?: number;
+    sourceLine: number;
+  }>;
+}
+
+export interface ClassNode extends GraphNode {
+  readonly label: 'Class';
+  readonly properties: Readonly<{
+    name: string;
+    repoUrl: string;
+    filePath: string;
+    language: string;
+    lineStart: number;
+    lineEnd: number;
+    isExported: boolean;
+    isAbstract: boolean;
+    docComment?: string;
+    sourceLine: number;
+  }>;
+}
+
+export interface MethodNode extends GraphNode {
+  readonly label: 'Method';
+  readonly properties: Readonly<{
+    classId: string;
+    name: string;
+    signature: string;
+    docComment?: string;
+    lineStart: number;
+    lineEnd: number;
+    isStatic: boolean;
+    isAsync: boolean;
+    visibility: MethodVisibility;
+    complexity?: number;
+    sourceLine: number;
+  }>;
+}
+
+export interface TypeDefNode extends GraphNode {
+  readonly label: 'TypeDef';
+  readonly properties: Readonly<{
+    name: string;
+    kind: TypeDefKind;
+    repoUrl: string;
+    filePath: string;
+    lineStart: number;
+    lineEnd: number;
+    isExported: boolean;
+    sourceLine: number;
   }>;
 }
 

@@ -163,6 +163,65 @@ export const apiNodeSchema = z.object({
   specPath: z.string().optional(),
 });
 
+// -- Symbol Node Schemas (Phase 1.3) --
+
+export const typeDefKindSchema = z.enum(['interface', 'type-alias', 'enum']);
+
+export const methodVisibilitySchema = z.enum(['public', 'private', 'protected']);
+
+export const functionNodeSchema = z.object({
+  name: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  language: z.string().min(1),
+  signature: z.string(),
+  docComment: z.string().optional(),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isExported: z.boolean(),
+  isAsync: z.boolean(),
+  complexity: z.number().int().nonnegative().optional(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+export const classNodeSchema = z.object({
+  name: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  language: z.string().min(1),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isExported: z.boolean(),
+  isAbstract: z.boolean(),
+  docComment: z.string().optional(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+export const methodNodeSchema = z.object({
+  classId: z.string().min(1),
+  name: z.string().min(1),
+  signature: z.string(),
+  docComment: z.string().optional(),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isStatic: z.boolean(),
+  isAsync: z.boolean(),
+  visibility: methodVisibilitySchema,
+  complexity: z.number().int().nonnegative().optional(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+export const typeDefNodeSchema = z.object({
+  name: z.string().min(1),
+  kind: typeDefKindSchema,
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isExported: z.boolean(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;

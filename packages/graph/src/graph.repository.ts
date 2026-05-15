@@ -208,6 +208,18 @@ export class GraphRepository {
         'CREATE INDEX IF NOT EXISTS FOR (n:Column) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Column) ON (n.tableId)',
         'CREATE INDEX IF NOT EXISTS FOR (n:Migration) ON (n.id)',
+        // Phase 1.3 — function-level symbol indexes
+        'CREATE INDEX IF NOT EXISTS FOR (n:Function) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Function) ON (n.repoUrl)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Function) ON (n.name)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Class) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Class) ON (n.repoUrl)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Class) ON (n.name)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Method) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:Method) ON (n.classId)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:TypeDef) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:TypeDef) ON (n.repoUrl)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:TypeDef) ON (n.name)',
       ];
       for (const query of indexes) {
         await session.run(query);
