@@ -16,13 +16,18 @@
 
 import { createLogger, metrics } from '@ekg/shared';
 import type { Logger, IngestionJob, ParseResult } from '@ekg/shared';
-import { SqliteRepository } from '@ekg/storage';
+import { SqliteRepository, RepoStateRepository } from '@ekg/storage';
 import { GraphRepository } from '@ekg/graph';
 import { Neo4jClient } from '@ekg/graph';
 import { ExtractionPipeline } from '@ekg/extractor';
 import { TypeScriptParserPool, MultiLanguageParser } from '@ekg/parser';
 import { ImportExtractor } from '@ekg/extractor';
 import { RepoCloner } from './repo.cloner.js';
+import { EmbeddingsService } from './embeddings.service.js';
+import { SearchIndexService } from './search-index.service.js';
+import { UrlApiLinker } from './url.api.linker.js';
+import { HistoryPass } from './history.pass.js';
+import type { UnresolvedHttpRepository } from '@ekg/storage';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -60,12 +65,20 @@ export class IngestionService {
   private readonly extractor: ImportExtractor;
   private readonly graphRepo: GraphRepository;
   private readonly sqliteRepo: SqliteRepository;
+  private readonly repoStateRepo: RepoStateRepository;
+  private readonly embeddingsService?: EmbeddingsService;
+  private readonly searchIndexService?: SearchIndexService;
+  private readonly urlApiLinker: UrlApiLinker;
+  private readonly historyPass: HistoryPass;
   private readonly logger: Logger;
 
   constructor(
     dataDir: string,
     neo4jClient: Neo4jClient,
     sqliteRepo: SqliteRepository,
+    embeddingsService?: EmbeddingsService,
+    searchIndexService?: SearchIndexService,
+    unresolvedHttpRepo?: UnresolvedHttpRepository,
   ) {
     this.cloner = new RepoCloner(dataDir);
     this.pipeline = new ExtractionPipeline();
@@ -74,6 +87,11 @@ export class IngestionService {
     this.extractor = new ImportExtractor();
     this.graphRepo = new GraphRepository(neo4jClient);
     this.sqliteRepo = sqliteRepo;
+    this.repoStateRepo = new RepoStateRepository(sqliteRepo.getConnection());
+    this.embeddingsService = embeddingsService;
+    this.searchIndexService = searchIndexService;
+    this.urlApiLinker = new UrlApiLinker(neo4jClient, unresolvedHttpRepo);
+    this.historyPass = new HistoryPass();
     this.logger = createLogger({ service: 'ingestion-service' });
   }
 
@@ -137,6 +155,7 @@ export class IngestionService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.sqliteRepo.updateJobStatus(job.id, 'FAILED', { error: errorMessage });
+      this.recordRepoState(options.repoUrl, undefined, errorMessage);
       this.logger.error({ jobId: job.id, error: errorMessage }, 'Ingestion failed');
       metrics.inc('ingest.failed');
       metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'FAILED' });
@@ -147,6 +166,7 @@ export class IngestionService {
         metrics.inc('ingest.success');
         metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'COMPLETED' });
         metrics.inc('ingest.files_processed', final.filesProcessed);
+        this.recordRepoState(options.repoUrl, final.commitSha, undefined);
       }
     }
   }
@@ -169,7 +189,62 @@ export class IngestionService {
 
     this.sqliteRepo.updateJobStatus(jobId, 'BUILDING_GRAPH');
     const nodesCreated = await this.graphRepo.mergeNodes(extraction.nodes);
-    const edgesCreated = await this.graphRepo.mergeRelationships(extraction.relationships);
+    let edgesCreated = await this.graphRepo.mergeRelationships(extraction.relationships);
+
+    // Phase 1.5 — URL → API resolution (cross-service CALLS_API edges).
+    // Best-effort: failures don't block ingest.
+    try {
+      if (extraction.httpCallSites && extraction.httpCallSites.length > 0) {
+        const linked = await this.urlApiLinker.link({
+          repoUrl: options.repoUrl,
+          localPath,
+          nodes: extraction.nodes,
+          httpCallSites: extraction.httpCallSites,
+        });
+        if (linked.newRelationships.length > 0) {
+          edgesCreated += await this.graphRepo.mergeRelationships(linked.newRelationships);
+        }
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'URL→API linker failed (continuing)');
+    }
+
+    // Phase 1.7 — CODEOWNERS per-file fan-out + opt-in git history. Best-effort.
+    try {
+      const history = await this.historyPass.run({
+        repoUrl: options.repoUrl,
+        localPath,
+        nodes: extraction.nodes,
+      });
+      if (history.newNodes.length > 0) {
+        await this.graphRepo.mergeNodes(history.newNodes);
+      }
+      if (history.newRelationships.length > 0) {
+        edgesCreated += await this.graphRepo.mergeRelationships(history.newRelationships);
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'History pass failed (continuing)');
+    }
+
+    // Best-effort BM25 indexing — always-on, local + free.
+    if (this.searchIndexService) {
+      await this.searchIndexService.indexFromExtraction(
+        options.repoUrl,
+        localPath,
+        extraction.nodes,
+        extraction.relationships,
+      );
+    }
+
+    // Best-effort embeddings — never fails the ingest.
+    if (this.embeddingsService?.enabled) {
+      await this.embeddingsService.embedFromExtraction(
+        options.repoUrl,
+        localPath,
+        extraction.nodes,
+        extraction.relationships,
+      );
+    }
 
     this.sqliteRepo.updateJobStatus(jobId, 'COMPLETED', {
       commitSha: currentSha,
@@ -260,6 +335,26 @@ export class IngestionService {
     // Repo-scoped orphan cleanup (no full-graph scan)
     await this.graphRepo.cleanupOrphans(options.repoUrl);
 
+    // Best-effort BM25 indexing on the freshly re-parsed nodes only.
+    if (this.searchIndexService) {
+      await this.searchIndexService.indexFromExtraction(
+        options.repoUrl,
+        localPath,
+        allNodes,
+        allRels,
+      );
+    }
+
+    // Best-effort embeddings on the freshly re-parsed nodes only.
+    if (this.embeddingsService?.enabled) {
+      await this.embeddingsService.embedFromExtraction(
+        options.repoUrl,
+        localPath,
+        allNodes,
+        allRels,
+      );
+    }
+
     this.sqliteRepo.updateJobStatus(jobId, 'COMPLETED', {
       commitSha: currentSha,
       filesProcessed: changedFiles.length,
@@ -344,6 +439,7 @@ export class IngestionService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.sqliteRepo.updateJobStatus(cloned.jobId, 'FAILED', { error: errorMessage });
+      this.recordRepoState(options.repoUrl, undefined, errorMessage);
       this.logger.error({ jobId: cloned.jobId, error: errorMessage }, 'Ingestion failed');
       metrics.inc('ingest.failed');
       metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'FAILED' });
@@ -354,7 +450,22 @@ export class IngestionService {
         metrics.inc('ingest.success');
         metrics.observe('ingest.duration_ms', Date.now() - startedAt, { status: 'COMPLETED' });
         metrics.inc('ingest.files_processed', final.filesProcessed);
+        this.recordRepoState(options.repoUrl, final.commitSha, undefined);
       }
+    }
+  }
+
+  /** Phase 4 freshness — record per-repo state after each ingest attempt. */
+  private recordRepoState(repoUrl: string, sha: string | undefined, errorMessage: string | undefined): void {
+    try {
+      if (errorMessage) {
+        this.repoStateRepo.upsertOnFailure(repoUrl, errorMessage);
+      } else if (sha) {
+        this.repoStateRepo.upsertOnSuccess(repoUrl, sha);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn({ repoUrl, err: msg }, 'failed to record repo_state');
     }
   }
 

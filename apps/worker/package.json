@@ -16,6 +16,7 @@
     "@ekg/graph": "*",
     "@ekg/parser": "*",
     "@ekg/extractor": "*",
+    "@ekg/embeddings": "*",
     "simple-git": "^3.27.0"
   },
   "devDependencies": {

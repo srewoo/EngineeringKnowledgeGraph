@@ -1,4 +1,7 @@
 export { TypeScriptParser } from './typescript.parser.js';
+export { TypeScriptSymbolsParser } from './typescript.symbols.parser.js';
+export { KafkaTypeScriptExtractor } from './kafka.ts.parser.js';
+export { HttpClientTypeScriptExtractor } from './http.client.ts.parser.js';
 export { TypeScriptParserPool } from './typescript.parser.pool.js';
 export type { PoolOptions } from './typescript.parser.pool.js';
 export { MultiLanguageParser } from './multi.language.parser.js';
@@ -15,3 +18,15 @@ export { GitLabClient } from './gitlab.client.js';
 export type { GitLabRepo, GitLabDiscoveryOptions } from './gitlab.client.js';
 export { GitHubClient } from './github.client.js';
 export type { GitHubDiscoveryOptions } from './github.client.js';
+export {
+  GitLogParser,
+  parseGitLogOutput,
+  DEFAULT_MAX_COMMITS,
+  DEFAULT_SINCE,
+} from './git.log.parser.js';
+export type {
+  ParsedCommit,
+  GitLogResult,
+  GitLogOptions,
+  GitFactory,
+} from './git.log.parser.js';

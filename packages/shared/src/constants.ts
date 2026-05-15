@@ -12,8 +12,12 @@ import type { NodeLabel, RelationshipType } from './types/graph.types.js';
 
 export const NODE_LABELS: readonly NodeLabel[] = [
   'Service', 'API', 'Database', 'Repo', 'File',
-  'Module', 'Config', 'MessageQueue', 'Feature', 'TestCase',
-  'Owner', 'Team',
+  'Module', 'Config', 'MessageQueue', 'Topic', 'Feature', 'TestCase',
+  'Owner', 'Team', 'Doc',
+  'Table', 'Column', 'Migration',
+  'Function', 'Class', 'Method', 'TypeDef',
+  'Commit',
+  'ConfigKey', 'SecretRef',
 ] as const;
 
 // -- Relationship Types --
@@ -21,8 +25,52 @@ export const NODE_LABELS: readonly NodeLabel[] = [
 export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'IMPORTS', 'EXPORTS', 'USES', 'CALLS', 'EXPOSES',
   'CONTAINS', 'DEPENDS_ON', 'READS_CONFIG', 'IMPLEMENTS', 'TESTS',
-  'OWNS', 'MEMBER_OF',
+  'OWNS', 'MEMBER_OF', 'DOCUMENTED_BY',
+  'HAS', 'ALTERS', 'RELATES_TO',
+  'DEFINES', 'EXTENDS',
+  'PRODUCES', 'CONSUMES', 'CALLS_API',
+  'OWNED_BY', 'TOUCHED',
+  'USES_SECRET',
 ] as const;
+
+// -- Config Kind / Secret Vendor (Phase 1.6) --
+
+/**
+ * Source of a `ConfigKey` node — drives how downstream consumers interpret
+ * `defaultValue` and `envScope`.
+ *
+ * - `HELM`  — Helm `values.yaml` (and `values.<env>.yaml` overrides).
+ * - `K8S`   — Kubernetes manifest env / envFrom / ConfigMap entries.
+ * - `ENV`   — `.env.example` / `.env.template` / `.env.sample` templates only.
+ *             Plain `.env` is NEVER parsed (risk of leaking real secrets).
+ * - `CI`    — GitHub Actions / GitLab CI variables.
+ * - `APP`   — Spring `application.yaml` / `application.properties`,
+ *             .NET `appsettings.json`, generic `config.json`.
+ */
+export const CONFIG_KIND = ['HELM', 'K8S', 'ENV', 'CI', 'APP'] as const;
+export type ConfigKind = typeof CONFIG_KIND[number];
+
+/**
+ * Source of a `SecretRef` node — the secret-management vendor whose
+ * URI/path is captured in `ref`. `UNKNOWN` covers generic Vault-like
+ * placeholders we cannot confidently classify.
+ */
+export const SECRET_VENDOR = [
+  'VAULT', 'AWS_SM', 'AWS_PARAMS', 'GCP_SECRETS', 'AZURE_KV', 'K8S_SECRET', 'UNKNOWN',
+] as const;
+export type SecretVendor = typeof SECRET_VENDOR[number];
+
+/** Hard cap for cyclomatic complexity counting — prevents pathological files. */
+export const MAX_CYCLOMATIC_COMPLEXITY = 50;
+
+/** Doc kinds — heuristic classification of markdown / docs files. */
+export const DOC_KINDS = ['README', 'RUNBOOK', 'ADR', 'CHANGELOG', 'PRD', 'OTHER'] as const;
+
+/** Documentation extensions — handled by MarkdownExtractor, not source parsers. */
+export const DOC_EXTENSIONS: ReadonlySet<string> = new Set(['.md', '.mdx', '.rst', '.adoc']);
+
+/** Hard cap on raw doc text retained as a node property. */
+export const MAX_DOC_TEXT_BYTES = 100 * 1024;
 
 // -- File Filtering --
 
@@ -67,11 +115,13 @@ export const DEFAULT_SUPPORTED_EXTENSIONS: readonly string[] = [
   // Shell / scripting
   '.sh', '.bash', '.zsh', '.ps1',
   // Schema / IDL
-  '.graphql', '.gql', '.proto', '.thrift',
+  '.graphql', '.gql', '.proto', '.thrift', '.prisma',
   // Config / data
   '.json', '.yaml', '.yml', '.toml', '.ini', '.env',
   // Infra
   '.tf', '.hcl',
+  // Documentation
+  '.md', '.mdx', '.rst', '.adoc',
 ] as const;
 
 /**
@@ -231,6 +281,34 @@ export const API_FRAMEWORK_PACKAGES: readonly string[] = [
   // Ruby / PHP / .NET
   'rails', 'sinatra', 'laravel', 'symfony',
 ] as const;
+
+// -- Kafka Client Detection (Phase 1.5 follow-ups) --
+
+/**
+ * Library names whose presence in imports hints that a file is doing
+ * Kafka producer/consumer work. Used by the Kafka extractors as a cheap
+ * pre-filter before walking AST/regex patterns.
+ */
+export const KAFKA_CLIENT_PACKAGES: readonly string[] = [
+  // JS / TS
+  'kafkajs', '@confluentinc/kafka-javascript', 'node-rdkafka', 'kafka-node',
+  // Java / Spring
+  'org.apache.kafka', 'spring-kafka', 'org.springframework.kafka',
+  // Go
+  'github.com/segmentio/kafka-go', 'github.com/Shopify/sarama', 'sarama',
+  // Python
+  'kafka-python', 'pykafka', 'confluent-kafka', 'aiokafka',
+] as const;
+
+// -- Service Host Hints (Phase 1.5 follow-ups) --
+
+/**
+ * `ekg.config.json` field shape for cross-service URL→API resolution:
+ * `serviceHosts: { "<service-name>": ["host-1", "host-2"] }`.
+ * The resolver matches an HTTP call's URL host against these entries
+ * before falling back to fuzzy name match.
+ */
+export const SERVICE_HOST_HINT_FILE = 'ekg.config.json';
 
 // -- Graph Constraints --
 

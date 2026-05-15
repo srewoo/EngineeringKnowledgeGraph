@@ -29,6 +29,9 @@ import type {
   ParsedRoute,
   ParsedHttpCall,
   ParsedDatabaseUsage,
+  ParsedKafka,
+  ParsedKafkaTopicRef,
+  ParsedHttpCallSite,
 } from '@ekg/shared';
 
 export type SupportedLanguage =
@@ -85,6 +88,8 @@ export class MultiLanguageParser {
     const httpCalls = this.extractHttpCalls(content, lang);
     const databaseUsages = this.extractDatabaseUsages(imports);
     const envVars = this.extractEnvVars(content, lang);
+    const kafka = this.extractKafka(content, lang);
+    const httpCallSites = this.extractHttpCallSites(content, lang);
 
     return {
       filePath,
@@ -95,7 +100,68 @@ export class MultiLanguageParser {
       databaseUsages,
       envVars,
       loc: countLines(content),
+      kafka,
+      httpCallSites,
     };
+  }
+
+  // -- Kafka producer/consumer (Phase 1.5 follow-ups) ------------------------
+
+  private extractKafka(src: string, lang: SupportedLanguage): ParsedKafka {
+    const producers: ParsedKafkaTopicRef[] = [];
+    const consumers: ParsedKafkaTopicRef[] = [];
+    const lineIndex = buildLineIndex(src);
+
+    for (const { re, side } of KAFKA_PATTERNS[lang] ?? []) {
+      const r = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+      let m: RegExpExecArray | null;
+      while ((m = r.exec(src)) !== null) {
+        const raw = m[1];
+        if (!raw) continue;
+        const sourceLine = offsetToLine(lineIndex, m.index);
+        const ref: ParsedKafkaTopicRef = {
+          name: raw,
+          sourceLine,
+          confidence: 'MEDIUM',
+        };
+        if (side === 'produce') producers.push(ref);
+        else if (side === 'consume') consumers.push(ref);
+        else if (side === 'subscribe-list') {
+          // Java collection-style: split args on comma; very best-effort.
+          for (const t of raw.split(',').map((s) => s.trim().replace(/^["']|["']$/g, ''))) {
+            if (t) consumers.push({ name: t, sourceLine, confidence: 'MEDIUM' });
+          }
+        }
+      }
+    }
+    return { producers, consumers };
+  }
+
+  // -- Rich HTTP call sites (Phase 1.5 follow-ups) ---------------------------
+
+  private extractHttpCallSites(
+    src: string,
+    lang: SupportedLanguage,
+  ): readonly ParsedHttpCallSite[] {
+    const out: ParsedHttpCallSite[] = [];
+    const lineIndex = buildLineIndex(src);
+    for (const { re, client } of HTTP_CALL_PATTERNS[lang] ?? []) {
+      const r = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+      let m: RegExpExecArray | null;
+      while ((m = r.exec(src)) !== null) {
+        const method = (m[1] ?? 'GET').toUpperCase();
+        const url = (m[2] ?? '').trim();
+        if (!url || (!url.startsWith('http') && !url.startsWith('/'))) continue;
+        out.push({
+          url,
+          method,
+          clientLibrary: client,
+          sourceLine: offsetToLine(lineIndex, m.index),
+          isTemplate: false,
+        });
+      }
+    }
+    return out;
   }
 
   // -- Imports -----------------------------------------------------------------
@@ -255,6 +321,69 @@ function countLines(content: string): number {
   for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) n++;
   return n;
 }
+
+/** Pre-compute line-start offsets so regex match index → 1-based line is O(log n). */
+function buildLineIndex(src: string): readonly number[] {
+  const out: number[] = [0];
+  for (let i = 0; i < src.length; i++) {
+    if (src.charCodeAt(i) === 10) out.push(i + 1);
+  }
+  return out;
+}
+
+function offsetToLine(lineStarts: readonly number[], offset: number): number {
+  // Binary search — last lineStart <= offset.
+  let lo = 0;
+  let hi = lineStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1;
+    if (lineStarts[mid]! <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+// ---- Kafka regex tables ----------------------------------------------------
+
+type KafkaSide = 'produce' | 'consume' | 'subscribe-list';
+
+const KAFKA_PATTERNS: Readonly<Record<SupportedLanguage, readonly { re: RegExp; side: KafkaSide }[]>> = {
+  java: [
+    // Spring KafkaTemplate: kafkaTemplate.send("topic", ...)
+    { re: /kafkaTemplate\.send\s*\(\s*["']([^"']+)["']/g, side: 'produce' },
+    // @KafkaListener(topics = "topic")
+    { re: /@KafkaListener\s*\([^)]*topics\s*=\s*["']([^"']+)["']/g, side: 'consume' },
+    // consumer.subscribe(Collections.singletonList("topic")) or Arrays.asList("a","b")
+    { re: /\.subscribe\s*\(\s*(?:Collections\.singletonList|Arrays\.asList|List\.of)\s*\(\s*([^)]+)\)/g, side: 'subscribe-list' },
+  ],
+  kotlin: [
+    { re: /kafkaTemplate\.send\s*\(\s*["']([^"']+)["']/g, side: 'produce' },
+    { re: /@KafkaListener\s*\([^)]*topics\s*=\s*\[?\s*["']([^"']+)["']/g, side: 'consume' },
+  ],
+  scala: [],
+  go: [
+    // segmentio/kafka-go: kafka.NewWriter(kafka.WriterConfig{Topic: "t"})
+    { re: /kafka\.WriterConfig\s*\{[^}]*Topic\s*:\s*["']([^"']+)["']/g, side: 'produce' },
+    // kafka.Message{Topic: "t"}
+    { re: /kafka\.Message\s*\{[^}]*Topic\s*:\s*["']([^"']+)["']/g, side: 'produce' },
+    // kafka.NewReader(kafka.ReaderConfig{Topic: "t"})
+    { re: /kafka\.ReaderConfig\s*\{[^}]*Topic\s*:\s*["']([^"']+)["']/g, side: 'consume' },
+  ],
+  python: [
+    // confluent-kafka / kafka-python: producer.send('topic', ...)
+    { re: /\bproducer\.send\s*\(\s*["']([^"']+)["']/g, side: 'produce' },
+    // consumer.subscribe(['t1','t2'])
+    { re: /\bconsumer\.subscribe\s*\(\s*\[\s*([^\]]+)\]/g, side: 'subscribe-list' },
+  ],
+  rust: [],
+  ruby: [
+    { re: /\bproducer\.produce\s*\(\s*[^,]+,\s*topic:\s*["']([^"']+)["']/g, side: 'produce' },
+  ],
+  php: [],
+  csharp: [],
+  c: [],
+  cpp: [],
+};
 
 // ---- Language-specific regex tables ----------------------------------------
 

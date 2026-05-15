@@ -19,8 +19,9 @@ dotenv.config({ path: envPath });
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
-import { SqliteRepository } from '@ekg/storage';
-import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
+import { SqliteRepository, UnresolvedHttpRepository } from '@ekg/storage';
+import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService, SearchIndexService } from '@ekg/worker';
+import { bootstrapAdapters } from '@ekg/adapters';
 import { createMcpServer } from './server.js';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -76,7 +77,28 @@ async function main(): Promise<void> {
 
   // Initialise services
   const graphQueries = new GraphQueries(neo4jClient);
-  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo);
+
+  // Embeddings — opt-in via EKG_EMBEDDINGS_ENABLED=true. Stored in a sibling
+  // SQLite file so the main metadata DB stays small and a wiped embeddings
+  // store does not affect ingestion bookkeeping.
+  const embeddingsEnabled = (process.env['EKG_EMBEDDINGS_ENABLED'] ?? 'false').toLowerCase() === 'true';
+  const embeddingsService = new EmbeddingsService({
+    enabled: embeddingsEnabled,
+    dbPath: join(env.dataDir, 'ekg-embeddings.db'),
+  });
+  if (embeddingsEnabled) {
+    logger.info('Embeddings enabled (EKG_EMBEDDINGS_ENABLED=true)');
+  }
+
+  // BM25 / FTS5 — always-on, local + free. Stored in a sibling SQLite file
+  // so heavy text indexing does not bloat the metadata DB.
+  const searchIndexDbPath = join(env.dataDir, 'ekg-search.db');
+  const searchIndexService = new SearchIndexService({ dbPath: searchIndexDbPath });
+  const searchTextRepo = searchIndexService.getRepository();
+  logger.info({ searchIndexDbPath }, 'BM25 search index initialised');
+
+  const unresolvedHttpRepo = new UnresolvedHttpRepository(sqliteRepo.getConnection());
+  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo, embeddingsService, searchIndexService, unresolvedHttpRepo);
   const bulkService = new BulkIngestionService(ingestionService, sqliteRepo, env.ingestTimeoutMs);
   const serviceResolver = new ServiceResolver(neo4jClient);
 
@@ -104,6 +126,20 @@ async function main(): Promise<void> {
     gitlabUrl: env.gitlabUrl,
   }, 'Creating MCP server');
 
+  // Phase 6 — bootstrap external MCP adapters from ekg.config.json. The
+  // monorepo root is two levels above this file's package directory.
+  const repoRoot = resolve(__dirname, '..', '..', '..');
+  let adapterRegistry: import('@ekg/adapters').AdapterRegistry | undefined;
+  let runtimeRegistry: import('@ekg/advanced').RuntimeProviderRegistry | undefined;
+  try {
+    const result = await bootstrapAdapters({ configPath: repoRoot });
+    adapterRegistry = result.registry;
+    runtimeRegistry = result.runtimeRegistry;
+    log.info({ count: result.registry.size() }, 'External MCP adapters bootstrapped');
+  } catch (err) {
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'adapter bootstrap failed');
+  }
+
   const server = createMcpServer({
     neo4jClient,
     graphQueries,
@@ -111,6 +147,10 @@ async function main(): Promise<void> {
     ingestionService,
     bulkService,
     serviceResolver,
+    embeddingsService,
+    searchTextRepo,
+    ...(adapterRegistry ? { adapterRegistry } : {}),
+    ...(runtimeRegistry ? { runtimeRegistry } : {}),
     gitlabConfig: {
       gitlabUrl: env.gitlabUrl,
       token: env.gitToken ?? '',
@@ -137,6 +177,8 @@ async function main(): Promise<void> {
       logger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Bulk drain failed');
     }
     try { await ingestionService.close(); } catch { /* ignore */ }
+    try { embeddingsService.close(); } catch { /* ignore */ }
+    try { searchIndexService.close(); } catch { /* ignore */ }
     try { sqliteRepo.close(); } catch { /* ignore */ }
     try { await neo4jClient.close(); } catch { /* ignore */ }
     logger.info('Shutdown complete');

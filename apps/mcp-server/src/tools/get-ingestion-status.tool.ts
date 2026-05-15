@@ -53,7 +53,12 @@ export function registerGetIngestionStatusTool(
                 startedAt: progress.startedAt,
                 updatedAt: progress.updatedAt,
                 completedAt: progress.completedAt,
-                failedRepos: progress.failedRepos.slice(0, 10),
+                failedRepos: progress.failedRepos.slice(0, 10).map((f) => ({
+                  name: f.name,
+                  error: f.error,
+                  errorCategory: f.errorCategory ?? 'UNKNOWN',
+                  attempts: f.attempts ?? 1,
+                })),
                 recentSuccess: progress.successRepos.slice(-5).map((r) => r.name),
               }, null, 2),
             }],

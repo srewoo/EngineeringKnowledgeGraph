@@ -1,0 +1,7 @@
+# version: v1
+Class: UNKNOWN.
+
+Strategy:
+- Re-classify with `route.classify` once.
+- Otherwise default to `retrieve.semantic` over the whole graph.
+- Be especially conservative — REFUSE rather than guess.

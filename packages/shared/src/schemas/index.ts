@@ -82,6 +82,199 @@ export const getApiMapInputSchema = z.object({
   service: z.string().optional(),
 });
 
+// -- Doc Schemas --
+
+export const docKindSchema = z.enum(['README', 'RUNBOOK', 'ADR', 'CHANGELOG', 'PRD', 'OTHER']);
+
+export const docHeadingSchema = z.object({
+  level: z.number().int().min(1).max(6),
+  text: z.string(),
+});
+
+export const codeBlockSchema = z.object({
+  language: z.string(),
+  code: z.string(),
+  startLine: z.number().int().nonnegative(),
+});
+
+export const docLinkSchema = z.object({
+  text: z.string(),
+  url: z.string(),
+});
+
+export const docNodeSchema = z.object({
+  path: z.string().min(1),
+  repoUrl: z.string().min(1),
+  kind: docKindSchema,
+  title: z.string(),
+  headings: z.array(docHeadingSchema),
+  rawText: z.string(),
+  codeBlockCount: z.number().int().nonnegative(),
+  linkCount: z.number().int().nonnegative(),
+  format: z.enum(['markdown', 'mdx', 'rst', 'adoc']),
+});
+
+// -- Schema (DB) Node Schemas --
+
+export const tableNodeSchema = z.object({
+  name: z.string().min(1),
+  schema: z.string().optional(),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  sourceLine: z.number().int().nonnegative(),
+  raw: z.string().optional(),
+});
+
+export const columnNodeSchema = z.object({
+  tableId: z.string().min(1),
+  name: z.string().min(1),
+  type: z.string().min(1),
+  nullable: z.boolean(),
+  isPrimary: z.boolean(),
+  isUnique: z.boolean(),
+  isList: z.boolean().optional(),
+  defaultValue: z.string().optional(),
+  mappedName: z.string().optional(),
+});
+
+export const migrationNodeSchema = z.object({
+  name: z.string().min(1),
+  filePath: z.string().min(1),
+  repoUrl: z.string().min(1),
+  appliedAt: z.string().optional(),
+});
+
+// -- API (OpenAPI / Swagger) Node Schemas --
+
+export const apiSpecVersionSchema = z.enum(['openapi-3', 'swagger-2']);
+
+export const apiNodeSchema = z.object({
+  method: z.string().min(1),
+  path: z.string().min(1),
+  framework: z.string().min(1),
+  // Phase 1.5 enrichment — all optional.
+  operationId: z.string().optional(),
+  summary: z.string().optional(),
+  description: z.string().optional(),
+  requestSchema: z.unknown().optional(),
+  responseSchemas: z.record(z.string(), z.unknown()).optional(),
+  tags: z.array(z.string()).optional(),
+  specVersion: apiSpecVersionSchema.optional(),
+  specPath: z.string().optional(),
+});
+
+// -- Symbol Node Schemas (Phase 1.3) --
+
+export const typeDefKindSchema = z.enum(['interface', 'type-alias', 'enum']);
+
+export const methodVisibilitySchema = z.enum(['public', 'private', 'protected']);
+
+export const functionNodeSchema = z.object({
+  name: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  language: z.string().min(1),
+  signature: z.string(),
+  docComment: z.string().optional(),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isExported: z.boolean(),
+  isAsync: z.boolean(),
+  complexity: z.number().int().nonnegative().optional(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+export const classNodeSchema = z.object({
+  name: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  language: z.string().min(1),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isExported: z.boolean(),
+  isAbstract: z.boolean(),
+  docComment: z.string().optional(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+export const methodNodeSchema = z.object({
+  classId: z.string().min(1),
+  name: z.string().min(1),
+  signature: z.string(),
+  docComment: z.string().optional(),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isStatic: z.boolean(),
+  isAsync: z.boolean(),
+  visibility: methodVisibilitySchema,
+  complexity: z.number().int().nonnegative().optional(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+export const typeDefNodeSchema = z.object({
+  name: z.string().min(1),
+  kind: typeDefKindSchema,
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  lineStart: z.number().int().nonnegative(),
+  lineEnd: z.number().int().nonnegative(),
+  isExported: z.boolean(),
+  sourceLine: z.number().int().nonnegative(),
+});
+
+// -- Ownership / Commit Schemas (Phase 1.7) --
+
+export const ownerKindSchema = z.enum(['user', 'team', 'email']);
+
+export const ownerNodeSchema = z.object({
+  identifier: z.string().min(1),
+  kind: ownerKindSchema,
+  repoUrl: z.string().min(1),
+});
+
+export const teamNodeSchema = z.object({
+  name: z.string().min(1),
+  repoUrl: z.string().min(1),
+});
+
+export const commitNodeSchema = z.object({
+  sha: z.string().min(1),
+  repoUrl: z.string().min(1),
+  author: z.string(),
+  authorEmail: z.string(),
+  message: z.string().max(500),
+  authoredAt: z.string(),
+  parentShas: z.array(z.string()),
+});
+
+// -- Config & Secret Schemas (Phase 1.6) --
+
+export const configKindSchema = z.enum(['HELM', 'K8S', 'ENV', 'CI', 'APP']);
+
+export const secretVendorSchema = z.enum([
+  'VAULT', 'AWS_SM', 'AWS_PARAMS', 'GCP_SECRETS', 'AZURE_KV', 'K8S_SECRET', 'UNKNOWN',
+]);
+
+export const configKeyNodeSchema = z.object({
+  key: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  sourceLine: z.number().int().nonnegative(),
+  kind: configKindSchema,
+  defaultValue: z.string().optional(),
+  envScope: z.string().optional(),
+  isSecret: z.boolean(),
+  raw: z.string().optional(),
+});
+
+export const secretRefNodeSchema = z.object({
+  vendor: secretVendorSchema,
+  ref: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  sourceLine: z.number().int().nonnegative(),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;

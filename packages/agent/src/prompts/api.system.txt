@@ -1,0 +1,8 @@
+# version: v1
+Class: API (which endpoint / route / GraphQL operation).
+
+Strategy:
+- `retrieve.semantic(label="API", query=<question>)`.
+- Confirm with `code.read` on the controller/handler file.
+Cite: "API:<id>" plus the source citation. HIGH if route + method match
+literally; MEDIUM for paraphrased intent matches.

@@ -80,6 +80,123 @@ export interface ParsedDatabaseUsage {
 }
 
 /**
+ * Symbol-level extraction (Phase 1.3) — function/class/method/typedef and
+ * the edges between them. Carried on ParseResult so it flows through the
+ * worker-thread pool unchanged.
+ *
+ * Cross-file/cross-module callee resolution is deferred — unresolved targets
+ * use a `name@modulePath` reference id with confidence MEDIUM.
+ */
+export interface ParsedFunction {
+  readonly id: string;
+  readonly name: string;
+  readonly signature: string;
+  readonly docComment?: string;
+  readonly lineStart: number;
+  readonly lineEnd: number;
+  readonly isExported: boolean;
+  readonly isAsync: boolean;
+  readonly complexity: number;
+}
+
+export interface ParsedClass {
+  readonly id: string;
+  readonly name: string;
+  readonly lineStart: number;
+  readonly lineEnd: number;
+  readonly isExported: boolean;
+  readonly isAbstract: boolean;
+  readonly docComment?: string;
+  /** Reference id (`name@modulePath` or local class id) for the extended class, if any. */
+  readonly extendsRef?: string;
+}
+
+export interface ParsedMethod {
+  readonly id: string;
+  readonly classId: string;
+  readonly name: string;
+  readonly signature: string;
+  readonly docComment?: string;
+  readonly lineStart: number;
+  readonly lineEnd: number;
+  readonly isStatic: boolean;
+  readonly isAsync: boolean;
+  readonly visibility: 'public' | 'private' | 'protected';
+  readonly complexity: number;
+}
+
+export interface ParsedTypeDef {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: 'interface' | 'type-alias' | 'enum';
+  readonly lineStart: number;
+  readonly lineEnd: number;
+  readonly isExported: boolean;
+}
+
+/**
+ * A call edge from a function or method to another callable.
+ * `targetId` is either a real id (same-file resolved) or a `name@modulePath`
+ * reference (unresolved import — MEDIUM confidence).
+ */
+export interface ParsedCall {
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly resolved: boolean;
+}
+
+export interface ParsedTypeUse {
+  readonly sourceId: string;
+  readonly targetId: string;
+  readonly resolved: boolean;
+}
+
+export interface ParsedSymbols {
+  readonly functions: readonly ParsedFunction[];
+  readonly classes: readonly ParsedClass[];
+  readonly methods: readonly ParsedMethod[];
+  readonly typeDefs: readonly ParsedTypeDef[];
+  readonly calls: readonly ParsedCall[];
+  readonly typeUses: readonly ParsedTypeUse[];
+}
+
+/**
+ * Kafka topic literal extracted from a producer or consumer call site
+ * (Phase 1.5 follow-ups).
+ *
+ * `template` carries the original template-literal form (with `${var}`
+ * placeholders) when the literal isn't a plain string. `name` is what
+ * we use as the topic node id.
+ */
+export interface ParsedKafkaTopicRef {
+  readonly name: string;
+  readonly template?: string;
+  readonly sourceLine: number;
+  readonly confidence: 'HIGH' | 'MEDIUM';
+  readonly clientLibrary?: string;
+}
+
+export interface ParsedKafka {
+  readonly producers: readonly ParsedKafkaTopicRef[];
+  readonly consumers: readonly ParsedKafkaTopicRef[];
+}
+
+/**
+ * Rich HTTP call site extracted for cross-service URL→API linking.
+ * Carries the source line and an optional caller symbol id (function/method)
+ * so the resolver can emit `Function -[CALLS_API]-> API` edges.
+ */
+export interface ParsedHttpCallSite {
+  readonly url: string;
+  readonly method: string;
+  readonly clientLibrary: string;
+  readonly sourceLine: number;
+  readonly callerSymbolId?: string;
+  /** True when the URL was a template literal containing `${var}` placeholders. */
+  readonly isTemplate: boolean;
+}
+
+/**
  * Complete parse result for a single file.
  */
 export interface ParseResult {
@@ -92,4 +209,10 @@ export interface ParseResult {
   readonly envVars: readonly string[];
   /** Lines of code in the parsed file (cheap newline count). */
   readonly loc?: number;
+  /** Symbol-level extraction (Phase 1.3). Only populated for TS/JS today. */
+  readonly symbols?: ParsedSymbols;
+  /** Kafka producer/consumer topic literals (Phase 1.5 follow-ups). */
+  readonly kafka?: ParsedKafka;
+  /** Rich HTTP call sites for cross-service URL→API resolution (Phase 1.5 follow-ups). */
+  readonly httpCallSites?: readonly ParsedHttpCallSite[];
 }

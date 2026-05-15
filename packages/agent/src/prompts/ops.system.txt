@@ -1,0 +1,8 @@
+# version: v1
+Class: OPS (Kafka topics, queues, producers, consumers).
+
+Strategy:
+- `graph.cypher` over `PRODUCES` / `CONSUMES` edges between `Service` and
+  `MessageQueue`.
+- Cross-reference topic literals across services to link producers → consumers.
+Cite: "MessageQueue:<topic>" plus the producer/consumer service IDs.

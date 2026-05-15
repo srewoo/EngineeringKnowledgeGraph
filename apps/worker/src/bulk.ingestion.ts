@@ -6,13 +6,16 @@
  * and is visible across multiple clients.
  */
 
-import { createLogger } from '@ekg/shared';
-import type { Logger } from '@ekg/shared';
+import { createLogger, classifyError, isRetryableErrorCategory } from '@ekg/shared';
+import type { Logger, ErrorCategory } from '@ekg/shared';
 import { IngestionService } from './ingestion.service.js';
 import type { CloneOnlyResult } from './ingestion.service.js';
 import { GitLabClient } from '@ekg/parser';
 import type { GitLabRepo } from '@ekg/parser';
-import { SqliteRepository } from '@ekg/storage';
+import { SqliteRepository, DlqRepository } from '@ekg/storage';
+import { computeBackoffMs, sleep, DEFAULT_BULK_RETRY } from './bulk.retry.js';
+import type { BulkRetryConfig } from './bulk.retry.js';
+export type { BulkRetryConfig } from './bulk.retry.js';
 
 export interface BulkIngestionProgress {
   readonly bulkJobId: string;
@@ -26,7 +29,7 @@ export interface BulkIngestionProgress {
   readonly updatedAt: string;
   readonly completedAt?: string;
   readonly skippedRepos: readonly { name: string; reason: string }[];
-  readonly failedRepos: readonly { name: string; error: string }[];
+  readonly failedRepos: readonly { name: string; error: string; errorCategory?: ErrorCategory; attempts?: number }[];
   readonly successRepos: readonly { name: string; nodes: number; edges: number }[];
   /** Repos discovered but not yet processed — used to resume after restart. */
   readonly pendingRepos: readonly GitLabRepo[];
@@ -38,6 +41,8 @@ export class BulkIngestionService {
   private readonly ingestionService: IngestionService;
   private readonly gitlabClient: GitLabClient;
   private readonly sqliteRepo: SqliteRepository;
+  private readonly dlqRepo: DlqRepository;
+  private readonly retryConfig: BulkRetryConfig;
   private readonly logger: Logger;
   private readonly ingestTimeoutMs: number;
 
@@ -54,12 +59,73 @@ export class BulkIngestionService {
     ingestionService: IngestionService,
     sqliteRepo: SqliteRepository,
     ingestTimeoutMs = 600_000,
+    retryConfig: BulkRetryConfig = DEFAULT_BULK_RETRY,
   ) {
     this.ingestionService = ingestionService;
     this.gitlabClient = new GitLabClient();
     this.sqliteRepo = sqliteRepo;
+    this.dlqRepo = new DlqRepository(sqliteRepo.getConnection());
     this.ingestTimeoutMs = ingestTimeoutMs;
+    this.retryConfig = retryConfig;
     this.logger = createLogger({ service: 'bulk-ingestion' });
+  }
+
+  /** Exposed for the retry_dlq MCP tool. */
+  getDlqRepository(): DlqRepository {
+    return this.dlqRepo;
+  }
+
+  /**
+   * Re-enqueue a list of repos by URL. Used by the retry_dlq tool.
+   * Discovery is skipped — caller has already chosen the repos.
+   */
+  startBulkIngestForList(
+    repoUrls: readonly string[],
+    token: string,
+    concurrency: number,
+    branch = 'main',
+  ): string {
+    const bulkJobId = `bulk-retry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const repos: GitLabRepo[] = repoUrls.map((url) => ({
+      id: 0,
+      name: url.split('/').pop()?.replace(/\.git$/, '') ?? url,
+      fullPath: url,
+      httpUrl: url,
+      sshUrl: url,
+      defaultBranch: branch,
+      repoSizeMb: 0,
+      lastActivity: new Date().toISOString(),
+      archived: false,
+    }));
+
+    const progress: BulkIngestionProgress = {
+      bulkJobId,
+      status: 'INGESTING',
+      totalDiscovered: repos.length,
+      totalIngested: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      currentRepo: '',
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      skippedRepos: [],
+      failedRepos: [],
+      successRepos: [],
+      pendingRepos: [...repos],
+      concurrency,
+    };
+    this.persist(progress);
+    this.logger.info({ bulkJobId, count: repos.length }, 'Bulk re-ingest from list started');
+
+    const promise = this.processQueue(bulkJobId, [...repos], repos.length, token, concurrency)
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error({ bulkJobId, error: message }, 'Bulk re-ingest from list crashed');
+        this.updateProgress(bulkJobId, { status: 'FAILED' });
+      })
+      .finally(() => { this.inflight.delete(promise); });
+    this.inflight.add(promise);
+    return bulkJobId;
   }
 
   /**
@@ -230,7 +296,7 @@ export class BulkIngestionService {
     concurrency: number,
     seed?: {
       success: { name: string; nodes: number; edges: number }[];
-      failed: { name: string; error: string }[];
+      failed: { name: string; error: string; errorCategory?: ErrorCategory; attempts?: number }[];
       skipped: { name: string; reason: string }[];
     },
   ): Promise<void> {
@@ -241,7 +307,7 @@ export class BulkIngestionService {
     const writeConcurrency = Math.min(Math.max(concurrency, 1), 32);
     const cloneConcurrency = Math.min(writeConcurrency * 2, 10);
     const bufferLimit = cloneConcurrency * 2;
-    const MAX_REPO_ATTEMPTS = 3;
+    const retry = this.retryConfig;
 
     type Cloned = { repo: GitLabRepo; cloned: CloneOnlyResult };
     const buffer: Cloned[] = [];
@@ -304,8 +370,20 @@ export class BulkIngestionService {
           notify();
         } catch (error) {
           const lastError = error instanceof Error ? error.message : String(error);
-          this.logger.warn({ bulkJobId, repo: repo.fullPath, error: lastError }, 'Clone failed');
-          failed.push({ name: repo.fullPath, error: lastError });
+          // Clone-stage failures default to CLONE_FAILED unless the classifier
+          // sees a more specific signature (e.g. ETIMEDOUT on the abort path).
+          const detected = classifyError(error);
+          const errorCategory: ErrorCategory = detected === 'UNKNOWN' ? 'CLONE_FAILED' : detected;
+          this.logger.warn({ bulkJobId, repo: repo.fullPath, error: lastError, errorCategory }, 'Clone failed');
+          failed.push({ name: repo.fullPath, error: lastError, errorCategory, attempts: 1 });
+          this.dlqRepo.upsert({
+            bulkJobId,
+            repoUrl: repo.httpUrl,
+            repoName: repo.fullPath,
+            errorCategory,
+            errorMessage: lastError,
+            attempts: 1,
+          });
         } finally {
           clearTimeout(timer);
         }
@@ -325,35 +403,30 @@ export class BulkIngestionService {
         notify(); // free up buffer space for clone workers
 
         const { repo, cloned } = item;
-        let lastError = 'Unknown error';
-        let succeeded = false;
-        for (let attempt = 1; attempt <= MAX_REPO_ATTEMPTS && !this.aborted; attempt++) {
-          try {
-            this.logger.info({
-              bulkJobId,
-              repo: repo.fullPath,
-              attempt,
-              progress: `${success.length + failed.length + 1}/${totalCount}`,
-            }, 'Writing graph');
-            const job = await this.ingestionService.ingestFromClone(cloned, { repoUrl: repo.httpUrl });
-            if (job.status === 'COMPLETED') {
-              success.push({ name: repo.fullPath, nodes: job.nodesCreated, edges: job.edgesCreated });
-              succeeded = true;
-              break;
-            }
-            lastError = job.error ?? 'Unknown error';
-          } catch (error) {
-            lastError = error instanceof Error ? error.message : String(error);
-            this.logger.warn({ bulkJobId, repo: repo.fullPath, attempt, error: lastError }, 'Write attempt failed');
-          }
-          if (attempt < MAX_REPO_ATTEMPTS) {
-            const waitMs = 2000 * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 500);
-            await new Promise((res) => setTimeout(res, waitMs));
-          }
-        }
-        if (!succeeded) {
-          failed.push({ name: repo.fullPath, error: lastError });
-          this.logger.error({ bulkJobId, repo: repo.fullPath, error: lastError }, 'Repo ingestion failed after retries');
+        const result = await this.runWriteWithRetry(bulkJobId, repo, cloned, retry, () =>
+          `${success.length + failed.length + 1}/${totalCount}`,
+        );
+        if (result.succeeded) {
+          success.push({ name: repo.fullPath, nodes: result.nodes, edges: result.edges });
+        } else {
+          failed.push({
+            name: repo.fullPath,
+            error: result.error,
+            errorCategory: result.category,
+            attempts: result.attempts,
+          });
+          this.dlqRepo.upsert({
+            bulkJobId,
+            repoUrl: repo.httpUrl,
+            repoName: repo.fullPath,
+            errorCategory: result.category,
+            errorMessage: result.error,
+            attempts: result.attempts,
+          });
+          this.logger.error({
+            bulkJobId, repo: repo.fullPath,
+            errorCategory: result.category, attempts: result.attempts, error: result.error,
+          }, 'Repo ingestion failed — written to DLQ');
         }
         persistProgress();
       }
@@ -393,6 +466,72 @@ export class BulkIngestionService {
       pending: queue.length,
       status: finalStatus,
     }, 'Bulk ingestion run finished');
+  }
+
+  /**
+   * Per-repo retry with exponential backoff + ±jitter.
+   *
+   * Retries only categories the classifier flags as transient (TIMEOUT, NEO4J_LOCK).
+   * Terminal categories (PARSE_FAILED, OOM, CLONE_FAILED, UNKNOWN) bail on first failure
+   * — retrying them is just wasted Neo4j load.
+   */
+  private async runWriteWithRetry(
+    bulkJobId: string,
+    repo: GitLabRepo,
+    cloned: CloneOnlyResult,
+    retry: BulkRetryConfig,
+    progressLabel: () => string,
+  ): Promise<
+    | { succeeded: true; nodes: number; edges: number; attempts: number }
+    | { succeeded: false; error: string; category: ErrorCategory; attempts: number }
+  > {
+    let lastError = 'Unknown error';
+    let lastCategory: ErrorCategory = 'UNKNOWN';
+    let attempt = 0;
+    for (attempt = 1; attempt <= retry.maxAttempts && !this.aborted; attempt++) {
+      try {
+        this.logger.info({
+          bulkJobId, repo: repo.fullPath, attempt,
+          progress: progressLabel(),
+        }, 'Writing graph');
+        const job = await this.ingestionService.ingestFromClone(cloned, { repoUrl: repo.httpUrl });
+        if (job.status === 'COMPLETED') {
+          return { succeeded: true, nodes: job.nodesCreated, edges: job.edgesCreated, attempts: attempt };
+        }
+        lastError = job.error ?? 'Unknown error';
+        lastCategory = classifyError(lastError);
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        lastCategory = classifyError(error);
+        this.logger.warn({
+          bulkJobId, repo: repo.fullPath, attempt,
+          errorCategory: lastCategory, error: lastError,
+        }, 'Write attempt failed');
+      }
+
+      const isLast = attempt >= retry.maxAttempts;
+      const retryable = isRetryableErrorCategory(lastCategory);
+      if (isLast || !retryable) {
+        if (!retryable) {
+          this.logger.warn({
+            bulkJobId, repo: repo.fullPath, attempt,
+            errorCategory: lastCategory,
+          }, 'Terminal error category — not retrying');
+        }
+        break;
+      }
+
+      const sleepMs = computeBackoffMs(retry, attempt);
+      this.logger.warn({
+        bulkJobId, repo: repo.fullPath, attempt,
+        prevError: lastError, errorCategory: lastCategory, sleepMs,
+      }, 'Retrying after backoff');
+      await sleep(sleepMs);
+    }
+    // `attempt` holds the index of the last try we executed (loop exits via
+    // `break` so the for-loop's post-increment didn't run).
+    const lastAttemptCount = Math.max(1, Math.min(attempt, retry.maxAttempts));
+    return { succeeded: false, error: lastError, category: lastCategory, attempts: lastAttemptCount };
   }
 
   private updateProgress(bulkJobId: string, update: Partial<BulkIngestionProgress>): void {
@@ -457,7 +596,7 @@ export class BulkIngestionService {
       updatedAt: row['updated_at'] as string,
       completedAt: (row['completed_at'] as string) ?? undefined,
       skippedRepos: (payload.skippedRepos as { name: string; reason: string }[]) ?? [],
-      failedRepos: (payload.failedRepos as { name: string; error: string }[]) ?? [],
+      failedRepos: (payload.failedRepos as { name: string; error: string; errorCategory?: ErrorCategory; attempts?: number }[]) ?? [],
       successRepos: (payload.successRepos as { name: string; nodes: number; edges: number }[]) ?? [],
       pendingRepos: (payload.pendingRepos as GitLabRepo[]) ?? [],
       concurrency: typeof payload.concurrency === 'number' ? payload.concurrency : 5,

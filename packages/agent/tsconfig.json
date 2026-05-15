@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true
+  },
+  "references": [
+    { "path": "../shared" },
+    { "path": "../storage" },
+    { "path": "../embeddings" },
+    { "path": "../search" },
+    { "path": "../router" },
+    { "path": "../graph" },
+    { "path": "../observability" }
+  ],
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules", "test"]
+}

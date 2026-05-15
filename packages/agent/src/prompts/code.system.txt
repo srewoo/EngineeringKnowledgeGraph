@@ -1,0 +1,8 @@
+# version: v1
+Class: CODE (where is X implemented / defined / calculated).
+
+Strategy:
+- `retrieve.semantic(label="Function", query=<question>)` first.
+- Then `code.read(path, lineStart, lineEnd)` to confirm the snippet matches.
+Cite: "<repoUrl>:<path>:<lineStart>-<lineEnd>" exactly. HIGH only if a
+function body actually contains the logic; MEDIUM otherwise.

@@ -1,1 +1,13 @@
 export { SqliteRepository } from './sqlite.repository.js';
+export { EmbeddingsRepository } from './embeddings.repository.js';
+export type { EmbeddingRow, SimilarityHit } from './embeddings.repository.js';
+export { SearchTextRepository, sanitiseFtsQuery } from './search-text.repository.js';
+export type { SearchTextRow, Bm25Hit, Bm25Options } from './search-text.repository.js';
+export { RepoStateRepository } from './repo-state.repository.js';
+export type { RepoState } from './repo-state.repository.js';
+export { SnapshotRepository } from './snapshot.repository.js';
+export type { Snapshot } from './snapshot.repository.js';
+export { DlqRepository } from './dlq.repository.js';
+export type { DlqRow, DlqUpsert } from './dlq.repository.js';
+export { UnresolvedHttpRepository } from './unresolved-http.repository.js';
+export type { UnresolvedHttpRow, UnresolvedHttpUpsert } from './unresolved-http.repository.js';
