@@ -5,3 +5,5 @@ export { SearchTextRepository, sanitiseFtsQuery } from './search-text.repository
 export type { SearchTextRow, Bm25Hit, Bm25Options } from './search-text.repository.js';
 export { RepoStateRepository } from './repo-state.repository.js';
 export type { RepoState } from './repo-state.repository.js';
+export { SnapshotRepository } from './snapshot.repository.js';
+export type { Snapshot } from './snapshot.repository.js';

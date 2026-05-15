@@ -31,6 +31,7 @@
     { "path": "packages/agent" },
     { "path": "packages/observability" },
     { "path": "packages/eval" },
+    { "path": "packages/advanced" },
     { "path": "apps/worker" },
     { "path": "apps/mcp-server" }
   ],

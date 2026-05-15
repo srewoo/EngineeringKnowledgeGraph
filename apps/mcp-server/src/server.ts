@@ -9,7 +9,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createLogger } from '@ekg/shared';
 import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
-import { SqliteRepository } from '@ekg/storage';
+import { SqliteRepository, SnapshotRepository } from '@ekg/storage';
+import { RuntimeProviderRegistry } from '@ekg/advanced';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
 import type { EmbeddingsService } from '@ekg/worker';
 import type { SearchTextRepository } from '@ekg/storage';
@@ -38,6 +39,11 @@ import { registerDataFreshnessTool } from './tools/data-freshness.tool.js';
 import { registerIngestOnPushTool } from './tools/ingest-on-push.tool.js';
 import { registerSubmitFeedbackTool } from './tools/submit-feedback.tool.js';
 import { registerEvalRunTool } from './tools/eval-run.tool.js';
+// Phase 5 — advanced graph operations.
+import { registerSynthesizeFlowTool } from './tools/synthesize-flow.tool.js';
+import { registerAnalyzeImpactV2Tool } from './tools/analyze-impact-v2.tool.js';
+import { registerSnapshotGraphTool, registerDiffSnapshotsTool } from './tools/snapshot.tools.js';
+import { registerRuntimeEvidenceTool } from './tools/runtime-evidence.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -56,6 +62,7 @@ export interface ServerDependencies {
   readonly serviceResolver: ServiceResolver;
   readonly embeddingsService?: EmbeddingsService;
   readonly searchTextRepo?: SearchTextRepository;
+  readonly runtimeRegistry?: RuntimeProviderRegistry;
   readonly gitlabConfig: {
     readonly gitlabUrl: string;
     readonly token: string;
@@ -127,6 +134,15 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerSubmitFeedbackTool(server, deps.sqliteRepo);
   registerEvalRunTool(server);
 
+  // Phase 5 — advanced graph operations.
+  const snapshotRepo = new SnapshotRepository(deps.sqliteRepo.getConnection());
+  const runtimeRegistry = deps.runtimeRegistry ?? new RuntimeProviderRegistry();
+  registerSynthesizeFlowTool(server, deps.neo4jClient);
+  registerAnalyzeImpactV2Tool(server, deps.neo4jClient);
+  registerSnapshotGraphTool(server, deps.neo4jClient, snapshotRepo);
+  registerDiffSnapshotsTool(server, snapshotRepo);
+  registerRuntimeEvidenceTool(server, runtimeRegistry);
+
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);
   registerMetricsResource(server, deps.neo4jClient);
@@ -136,7 +152,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 22 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 27 tools, 4 resources, 2 prompts');
 
   return server;
 }

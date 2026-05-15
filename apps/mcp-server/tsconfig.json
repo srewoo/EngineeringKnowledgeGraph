@@ -15,6 +15,7 @@
     { "path": "../../packages/agent" },
     { "path": "../../packages/observability" },
     { "path": "../../packages/eval" },
+    { "path": "../../packages/advanced" },
     { "path": "../worker" }
   ],
   "include": ["src/**/*.ts"],
