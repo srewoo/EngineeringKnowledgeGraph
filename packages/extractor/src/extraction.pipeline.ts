@@ -27,6 +27,8 @@ import { ServiceDetector } from './service.detector.js';
 import { MarkdownExtractor } from './markdown.extractor.js';
 import { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
 import { OpenApiExtractor } from './openapi.extractor.js';
+import { GraphqlSdlExtractor } from './graphql.sdl.extractor.js';
+import { GrpcProtoExtractor } from './grpc.proto.extractor.js';
 import { SymbolsExtractor } from './symbols.extractor.js';
 import { HelmValuesExtractor } from './helm.values.extractor.js';
 import { K8sManifestExtractor } from './k8s.manifest.extractor.js';
@@ -49,6 +51,8 @@ export class ExtractionPipeline {
   private readonly markdownExtractor: MarkdownExtractor;
   private readonly prismaExtractor: SchemaPrismaExtractor;
   private readonly openApiExtractor: OpenApiExtractor;
+  private readonly graphqlSdlExtractor: GraphqlSdlExtractor;
+  private readonly grpcProtoExtractor: GrpcProtoExtractor;
   private readonly symbolsExtractor: SymbolsExtractor;
   private readonly helmExtractor: HelmValuesExtractor;
   private readonly k8sExtractor: K8sManifestExtractor;
@@ -69,6 +73,8 @@ export class ExtractionPipeline {
     this.markdownExtractor = new MarkdownExtractor();
     this.prismaExtractor = new SchemaPrismaExtractor();
     this.openApiExtractor = new OpenApiExtractor();
+    this.graphqlSdlExtractor = new GraphqlSdlExtractor();
+    this.grpcProtoExtractor = new GrpcProtoExtractor();
     this.symbolsExtractor = new SymbolsExtractor();
     this.helmExtractor = new HelmValuesExtractor();
     this.k8sExtractor = new K8sManifestExtractor();
@@ -285,6 +291,32 @@ export class ExtractionPipeline {
         if (enriched > 0) continue;
       }
 
+      if (sch.framework === 'graphql') {
+        const enriched = await this.handleGraphqlSdl(
+          sch.filePath,
+          relPath,
+          repoUrl,
+          servicesByDirLen,
+          allNodes,
+          allRelationships,
+        );
+        handledSpecPaths.add(sch.filePath);
+        if (enriched > 0) continue;
+      }
+
+      if (sch.framework === 'grpc') {
+        const enriched = await this.handleGrpcProto(
+          sch.filePath,
+          relPath,
+          repoUrl,
+          servicesByDirLen,
+          allNodes,
+          allRelationships,
+        );
+        handledSpecPaths.add(sch.filePath);
+        if (enriched > 0) continue;
+      }
+
       const owningService = this.findServiceForFile(relPath, servicesByDirLen);
       for (const route of sch.routes) {
         const apiId = `api:${route.method}:${route.path}`;
@@ -317,6 +349,17 @@ export class ExtractionPipeline {
     await this.sniffOpenApiSpecs(
       files,
       repoDir,
+      repoUrl,
+      servicesByDirLen,
+      handledSpecPaths,
+      allNodes,
+      allRelationships,
+    );
+
+    // Content-sniff for GraphQL SDL files shipped without a `.graphql` ext
+    // (e.g. `schema.txt`). Cheap — only inspects the file header.
+    await this.sniffGraphqlSdl(
+      files,
       repoUrl,
       servicesByDirLen,
       handledSpecPaths,
@@ -663,6 +706,81 @@ export class ExtractionPipeline {
   }
 
   /**
+   * Read a GraphQL SDL file, run GraphqlSdlExtractor, emit rich API nodes
+   * plus Service -[EXPOSES]-> API edges. Returns the number of API nodes
+   * produced (0 ⇒ caller should fall back to the basic scanner output).
+   */
+  private async handleGraphqlSdl(
+    absolutePath: string,
+    relativePath: string,
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<number> {
+    let content: string;
+    try {
+      content = await readFile(absolutePath, 'utf8');
+    } catch (err) {
+      this.logger.warn({ err, path: relativePath }, 'Failed to read GraphQL SDL; skipping');
+      return 0;
+    }
+    const { apis } = this.graphqlSdlExtractor.extract(content, relativePath, repoUrl);
+    if (apis.length === 0) return 0;
+    this.emitApisWithExposes(apis, relativePath, repoUrl, servicesByDirLen, 'graphql-sdl-extractor', allNodes, allRelationships);
+    return apis.length;
+  }
+
+  /**
+   * Read a `.proto` file, run GrpcProtoExtractor, emit rich API nodes plus
+   * Service -[EXPOSES]-> API edges. Returns the number of API nodes produced.
+   */
+  private async handleGrpcProto(
+    absolutePath: string,
+    relativePath: string,
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<number> {
+    let content: string;
+    try {
+      content = await readFile(absolutePath, 'utf8');
+    } catch (err) {
+      this.logger.warn({ err, path: relativePath }, 'Failed to read .proto; skipping');
+      return 0;
+    }
+    const { apis } = this.grpcProtoExtractor.extract(content, relativePath, repoUrl);
+    if (apis.length === 0) return 0;
+    this.emitApisWithExposes(apis, relativePath, repoUrl, servicesByDirLen, 'grpc-proto-extractor', allNodes, allRelationships);
+    return apis.length;
+  }
+
+  private emitApisWithExposes(
+    apis: readonly import('@ekg/shared').ApiNode[],
+    relativePath: string,
+    _repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    source: string,
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): void {
+    const owningService = this.findServiceForFile(relativePath, servicesByDirLen);
+    for (const api of apis) {
+      allNodes.push(api);
+      if (owningService) {
+        allRelationships.push({
+          type: 'EXPOSES',
+          sourceId: `service:${owningService.name}`,
+          targetId: api.id,
+          confidence: 'HIGH',
+          properties: { source, specPath: relativePath },
+        });
+      }
+    }
+  }
+
+  /**
    * Walk the already-scanned file list and content-sniff any `.json/.yaml/.yml`
    * file whose filename didn't match the OpenAPI/Swagger naming convention.
    * Skips files already handled by `handleOpenApiSpec`.
@@ -693,6 +811,45 @@ export class ExtractionPipeline {
       if (!sniffed) continue;
 
       await this.handleOpenApiSpec(
+        file.absolutePath,
+        file.relativePath,
+        repoUrl,
+        servicesByDirLen,
+        allNodes,
+        allRelationships,
+      );
+    }
+  }
+
+  /**
+   * Sniff plaintext files for GraphQL SDL signatures. Bounded to files we've
+   * already scanned. Skips paths handled by basename routing or already
+   * processed by `handleGraphqlSdl`.
+   */
+  private async sniffGraphqlSdl(
+    files: readonly { absolutePath: string; relativePath: string }[],
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    handledAbsPaths: ReadonlySet<string>,
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    for (const file of files) {
+      if (handledAbsPaths.has(file.absolutePath)) continue;
+      if (GraphqlSdlExtractor.handlesByPath(file.relativePath)) continue;
+      const ext = extname(file.relativePath).toLowerCase();
+      // Only sniff small text-ish files. Skip TS/JS/JSON/YAML — they have
+      // their own pipelines.
+      if (!['.txt', '.sdl', ''].includes(ext)) continue;
+      let content: string;
+      try {
+        content = await readFile(file.absolutePath, 'utf8');
+      } catch {
+        continue;
+      }
+      // Only inspect the head — full SDLs always declare a root early.
+      if (!GraphqlSdlExtractor.sniff(content.slice(0, 4096))) continue;
+      await this.handleGraphqlSdl(
         file.absolutePath,
         file.relativePath,
         repoUrl,

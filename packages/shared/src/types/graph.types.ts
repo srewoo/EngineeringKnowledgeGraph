@@ -120,7 +120,12 @@ export interface DatabaseNode extends GraphNode {
   }>;
 }
 
-export type ApiSpecVersion = 'openapi-3' | 'swagger-2';
+export type ApiSpecVersion =
+  | 'openapi-3'
+  | 'swagger-2'
+  | 'graphql-sdl'
+  | 'grpc-proto3'
+  | 'grpc-proto2';
 
 export interface ApiNode extends GraphNode {
   readonly label: 'API';
