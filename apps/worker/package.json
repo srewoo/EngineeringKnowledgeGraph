@@ -1,0 +1,26 @@
+{
+  "name": "@ekg/worker",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@ekg/shared": "*",
+    "@ekg/storage": "*",
+    "@ekg/graph": "*",
+    "@ekg/parser": "*",
+    "@ekg/extractor": "*",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  }
+}

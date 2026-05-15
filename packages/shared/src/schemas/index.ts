@@ -1,0 +1,93 @@
+/**
+ * Zod schemas for runtime validation of all external inputs.
+ *
+ * Used at MCP tool boundaries, config file loading, and API inputs.
+ * Every external input must pass through a schema before processing.
+ */
+
+import { z } from 'zod';
+
+// -- Config Schemas --
+
+export const repoConfigSchema = z.object({
+  url: z.string().min(1, 'Repo URL is required'),
+  branch: z.string().default('main'),
+  token: z.string().optional(),
+  serviceMappings: z.record(z.string(), z.string()).optional(),
+});
+
+export const ekgConfigSchema = z.object({
+  repos: z.array(repoConfigSchema).min(1, 'At least one repo is required'),
+  ignoreDirs: z.array(z.string()).default([
+    'node_modules', 'dist', 'build', '.git', 'coverage', 'vendor',
+  ]),
+  supportedExtensions: z.array(z.string()).default([
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  ]),
+});
+
+// -- Environment Schema --
+
+export const envConfigSchema = z.object({
+  neo4jUri: z.string().default('bolt://localhost:7687'),
+  neo4jUser: z.string().default('neo4j'),
+  neo4jPassword: z.string().default('ekg-local-dev'),
+  gitToken: z.string().optional(),
+  logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  dataDir: z.string().default('./data'),
+  gitlabUrl: z.string().default('https://gitlab.com'),
+  gitlabGroupIds: z.string().optional(),
+  maxRepoSizeMb: z.coerce.number().positive().default(1024),
+  bulkConcurrency: z.coerce.number().int().positive().max(32).default(5),
+  ingestTimeoutMs: z.coerce.number().int().positive().min(60_000).default(600_000),
+});
+
+// -- MCP Tool Input Schemas --
+
+export const ingestRepoInputSchema = z.object({
+  url: z.string().min(1, 'Repository URL is required'),
+  branch: z.string().default('main'),
+  token: z.string().optional(),
+});
+
+export const searchCodebaseInputSchema = z.object({
+  query: z.string().min(1, 'Search query is required'),
+  type: z.enum([
+    'Service', 'API', 'Database', 'Repo', 'File',
+    'Module', 'Config', 'MessageQueue',
+  ]).optional(),
+  limit: z.number().int().positive().max(100).default(20),
+});
+
+export const getDependenciesInputSchema = z.object({
+  service: z.string().min(1, 'Service name is required'),
+  depth: z.number().int().positive().max(10).default(2),
+});
+
+export const analyzeImpactInputSchema = z.object({
+  node: z.string().min(1, 'Node name is required'),
+  changeType: z.enum(['api_change', 'db_change', 'removal', 'modification']).optional(),
+  depth: z.number().int().positive().max(10).default(3),
+});
+
+export const getServiceSummaryInputSchema = z.object({
+  service: z.string().min(1, 'Service name is required'),
+});
+
+export const getIngestionStatusInputSchema = z.object({
+  repo: z.string().min(1, 'Repository URL or name is required'),
+});
+
+export const getApiMapInputSchema = z.object({
+  service: z.string().optional(),
+});
+
+// -- Inferred Types --
+
+export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;
+export type SearchCodebaseInput = z.infer<typeof searchCodebaseInputSchema>;
+export type GetDependenciesInput = z.infer<typeof getDependenciesInputSchema>;
+export type AnalyzeImpactInput = z.infer<typeof analyzeImpactInputSchema>;
+export type GetServiceSummaryInput = z.infer<typeof getServiceSummaryInputSchema>;
+export type GetIngestionStatusInput = z.infer<typeof getIngestionStatusInputSchema>;
+export type GetApiMapInput = z.infer<typeof getApiMapInputSchema>;

@@ -1,0 +1,391 @@
+/**
+ * Extraction pipeline — orchestrates the full extraction flow.
+ *
+ * scan files → parse each (TS or multi-lang) → extract relationships → graph-ready data.
+ *
+ * This is the core IP of the system.
+ */
+
+import { extname } from 'node:path';
+import { createLogger } from '@ekg/shared';
+import {
+  FileScanner,
+  ConfigScanner,
+  ApiSchemaScanner,
+  MetadataScanner,
+  TypeScriptParserPool,
+  MultiLanguageParser,
+} from '@ekg/parser';
+import type { CodeOwnerRule } from '@ekg/parser';
+import type { GraphNode, GraphRelationship, ExtractionResult, EkgConfig, Logger } from '@ekg/shared';
+import { ImportExtractor } from './import.extractor.js';
+import { ServiceDetector } from './service.detector.js';
+
+const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+
+export class ExtractionPipeline {
+  private readonly fileScanner: FileScanner;
+  private readonly configScanner: ConfigScanner;
+  private readonly schemaScanner: ApiSchemaScanner;
+  private readonly metadataScanner: MetadataScanner;
+  private readonly tsPool: TypeScriptParserPool;
+  private readonly multiParser: MultiLanguageParser;
+  private readonly importExtractor: ImportExtractor;
+  private readonly serviceDetector: ServiceDetector;
+  private readonly logger: Logger;
+
+  constructor() {
+    this.fileScanner = new FileScanner();
+    this.configScanner = new ConfigScanner();
+    this.schemaScanner = new ApiSchemaScanner();
+    this.metadataScanner = new MetadataScanner();
+    this.tsPool = new TypeScriptParserPool();
+    this.multiParser = new MultiLanguageParser();
+    this.importExtractor = new ImportExtractor();
+    this.serviceDetector = new ServiceDetector();
+    this.logger = createLogger({ service: 'extraction-pipeline' });
+  }
+
+  async extract(
+    repoDir: string,
+    repoUrl: string,
+    config?: Partial<EkgConfig>,
+    serviceMappings?: Readonly<Record<string, string>>,
+  ): Promise<ExtractionResult> {
+    this.logger.info({ repoDir, repoUrl }, 'Starting extraction pipeline');
+
+    const allNodes: GraphNode[] = [];
+    const allRelationships: GraphRelationship[] = [];
+
+    // Step 0: Repo metadata (CODEOWNERS + latest commit)
+    const metadata = await this.metadataScanner.scan(repoDir);
+
+    // Step 1: Detect services
+    const services = await this.serviceDetector.detect(repoDir, repoUrl, serviceMappings);
+    const serviceNodes = this.serviceDetector.toGraphNodes(services, repoUrl);
+    allNodes.push(...serviceNodes);
+
+    // Repo node — now enriched with latest commit metadata
+    allNodes.push({
+      id: `repo:${repoUrl}`,
+      label: 'Repo',
+      name: this.extractRepoName(repoUrl),
+      properties: {
+        url: repoUrl,
+        branch: 'main',
+        lastCommitSha: metadata.latestCommitSha ?? '',
+        lastCommitAt: metadata.latestCommitAt ?? '',
+      },
+    });
+
+    // Step 1b: Owners / Teams from CODEOWNERS
+    this.emitOwnerNodes(allNodes, allRelationships, services, metadata.codeOwners);
+
+    // CONTAINS: Repo → Service
+    for (const svc of serviceNodes) {
+      allRelationships.push({
+        type: 'CONTAINS',
+        sourceId: `repo:${repoUrl}`,
+        targetId: svc.id,
+        confidence: 'HIGH',
+        properties: {},
+      });
+    }
+
+    // Pre-sort services by directory length (longest first) for prefix matching
+    const servicesByDirLen = [...services].sort((a, b) => b.directory.length - a.directory.length);
+
+    // Step 2: Scan files
+    const files = await this.fileScanner.scan(repoDir, {
+      ignoreDirs: config?.ignoreDirs as string[] | undefined,
+      supportedExtensions: config?.supportedExtensions as string[] | undefined,
+    });
+    this.logger.info({ fileCount: files.length }, 'Files scanned');
+
+    // Step 3: Parse files in bounded-parallel batches
+    const concurrency = 8;
+    for (let i = 0; i < files.length; i += concurrency) {
+      const batch = files.slice(i, i + concurrency);
+      const parsed = await Promise.all(batch.map(async (file) => {
+        const ext = extname(file.absolutePath).toLowerCase();
+        if (TS_EXTENSIONS.has(ext)) {
+          return this.tsPool.parseFile(file.absolutePath);
+        }
+        if (MultiLanguageParser.handles(ext)) {
+          return this.multiParser.parseFile(file.absolutePath);
+        }
+        return undefined;
+      }));
+
+      for (let j = 0; j < parsed.length; j++) {
+        const result = parsed[j];
+        const file = batch[j]!;
+        if (!result) continue;
+        const extraction = this.importExtractor.extract(result, repoUrl);
+
+        // Enrich File nodes with size, LOC, repo + per-file last-changed metadata
+        for (const node of extraction.nodes) {
+          if (node.label !== 'File') continue;
+          const props = node.properties as Record<string, unknown>;
+          props['sizeBytes'] = file.sizeBytes;
+          if (typeof result.loc === 'number') props['loc'] = result.loc;
+          if (metadata.latestCommitAt) props['repoLastCommitAt'] = metadata.latestCommitAt;
+          const fileLastChanged = metadata.fileLastChangedAt.get(file.relativePath);
+          if (fileLastChanged) props['lastChangedAt'] = fileLastChanged;
+        }
+
+        allNodes.push(...extraction.nodes);
+        allRelationships.push(...extraction.relationships);
+
+        const matchingService = this.findServiceForFile(file.relativePath, servicesByDirLen);
+        if (matchingService) {
+          allRelationships.push({
+            type: 'CONTAINS',
+            sourceId: `service:${matchingService.name}`,
+            targetId: `${repoUrl}:${file.absolutePath}`,
+            confidence: 'HIGH',
+            properties: {},
+          });
+        }
+
+        // CODEOWNERS → Owner OWNS File
+        const owners = MetadataScanner.resolveOwners(file.relativePath, metadata.codeOwners);
+        for (const owner of owners) {
+          allRelationships.push({
+            type: 'OWNS',
+            sourceId: this.ownerNodeId(owner),
+            targetId: `${repoUrl}:${file.absolutePath}`,
+            confidence: 'HIGH',
+            properties: { source: 'CODEOWNERS' },
+          });
+        }
+      }
+    }
+
+    // Step 3.5: API schema files (OpenAPI / proto / GraphQL)
+    const schemaResults = await this.schemaScanner.scan(repoDir);
+    for (const sch of schemaResults) {
+      // Resolve which service owns this schema by directory prefix
+      const relPath = sch.filePath.startsWith(repoDir) ? sch.filePath.slice(repoDir.length + 1) : sch.filePath;
+      const owningService = this.findServiceForFile(relPath, servicesByDirLen);
+      for (const route of sch.routes) {
+        const apiId = `api:${route.method}:${route.path}`;
+        allNodes.push({
+          id: apiId,
+          label: 'API',
+          name: `${route.method} ${route.path}`,
+          properties: {
+            method: route.method,
+            path: route.path,
+            framework: route.framework,
+            schemaFile: relPath,
+          },
+        });
+        if (owningService) {
+          allRelationships.push({
+            type: 'EXPOSES',
+            sourceId: `service:${owningService.name}`,
+            targetId: apiId,
+            confidence: 'HIGH',
+            properties: { source: 'schema', schemaFile: relPath },
+          });
+        }
+      }
+    }
+
+    // Step 4: Config files for additional DB references
+    const configResults = await this.configScanner.scan(repoDir);
+    for (const configResult of configResults) {
+      for (const dbUsage of configResult.databaseUsages) {
+        const dbId = `db:${dbUsage.databaseType.toLowerCase()}`;
+        allNodes.push({
+          id: dbId,
+          label: 'Database',
+          name: dbUsage.databaseType,
+          properties: { type: dbUsage.databaseType, detectedVia: dbUsage.detectedVia },
+        });
+      }
+    }
+
+    // Step 5: Service-level rollup (optimised: O(N) via Maps)
+    this.inferServiceRelationships(allNodes, allRelationships, services, repoUrl);
+
+    // Deduplicate
+    const uniqueNodes = this.deduplicateNodes(allNodes);
+    const uniqueRels = this.deduplicateRelationships(allRelationships);
+
+    this.logger.info({
+      nodes: uniqueNodes.length,
+      relationships: uniqueRels.length,
+      services: services.length,
+      files: files.length,
+    }, 'Extraction pipeline completed');
+
+    return {
+      nodes: uniqueNodes,
+      relationships: uniqueRels,
+      sourceFile: repoDir,
+      repoUrl,
+    };
+  }
+
+  /**
+   * O(N) service-level rollup: index file nodes once, then bucket relationships
+   * by which service directory the file lives in.
+   */
+  private inferServiceRelationships(
+    nodes: readonly GraphNode[],
+    relationships: GraphRelationship[],
+    services: readonly { name: string; directory: string }[],
+    _repoUrl: string,
+  ): void {
+    // Index file nodes by id
+    const fileById = new Map<string, GraphNode>();
+    for (const n of nodes) {
+      if (n.label === 'File') fileById.set(n.id, n);
+    }
+
+    // Pre-sort services for longest-prefix matching
+    const sortedServices = [...services].sort((a, b) => b.directory.length - a.directory.length);
+
+    const serviceDbs = new Map<string, Set<string>>();
+    const serviceApis = new Map<string, Set<string>>();
+
+    for (const rel of relationships) {
+      if (rel.type !== 'USES' && rel.type !== 'EXPOSES') continue;
+      const fileNode = fileById.get(rel.sourceId);
+      if (!fileNode) continue;
+      const filePath = (fileNode.properties as { path?: string }).path ?? '';
+      let svcName: string | undefined;
+      for (const svc of sortedServices) {
+        if (filePath.startsWith(svc.directory)) { svcName = svc.name; break; }
+      }
+      if (!svcName) continue;
+
+      const key = `service:${svcName}`;
+      const map = rel.type === 'USES' ? serviceDbs : serviceApis;
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key)!.add(rel.targetId);
+    }
+
+    for (const [serviceId, dbIds] of serviceDbs) {
+      for (const dbId of dbIds) {
+        relationships.push({
+          type: 'USES',
+          sourceId: serviceId,
+          targetId: dbId,
+          confidence: 'HIGH',
+          properties: { inferred: true },
+        });
+      }
+    }
+    for (const [serviceId, apiIds] of serviceApis) {
+      for (const apiId of apiIds) {
+        relationships.push({
+          type: 'EXPOSES',
+          sourceId: serviceId,
+          targetId: apiId,
+          confidence: 'HIGH',
+          properties: { inferred: true },
+        });
+      }
+    }
+  }
+
+  private findServiceForFile(
+    relativePath: string,
+    servicesSortedByDirLen: readonly { name: string; directory: string }[],
+  ): { name: string; directory: string } | undefined {
+    for (const svc of servicesSortedByDirLen) {
+      if (relativePath.startsWith(svc.directory)) return svc;
+    }
+    return servicesSortedByDirLen[servicesSortedByDirLen.length - 1];
+  }
+
+  private deduplicateNodes(nodes: readonly GraphNode[]): readonly GraphNode[] {
+    const seen = new Map<string, GraphNode>();
+    for (const node of nodes) {
+      if (!seen.has(node.id)) seen.set(node.id, node);
+    }
+    return [...seen.values()];
+  }
+
+  private deduplicateRelationships(rels: readonly GraphRelationship[]): readonly GraphRelationship[] {
+    const seen = new Map<string, GraphRelationship>();
+    for (const rel of rels) {
+      const key = `${rel.type}|${rel.sourceId}|${rel.targetId}`;
+      if (!seen.has(key)) seen.set(key, rel);
+    }
+    return [...seen.values()];
+  }
+
+  private extractRepoName(repoUrl: string): string {
+    const match = /\/([^/]+?)(?:\.git)?$/.exec(repoUrl);
+    return match?.[1] ?? 'unknown-repo';
+  }
+
+  /**
+   * Build the per-owner node id. `@org/team` → Team; `@user` or `email@x` → Owner.
+   */
+  private ownerNodeId(owner: string): string {
+    if (owner.startsWith('@') && owner.includes('/')) return `team:${owner.slice(1).toLowerCase()}`;
+    return `owner:${owner.replace(/^@/, '').toLowerCase()}`;
+  }
+
+  /**
+   * Emit Owner / Team nodes from CODEOWNERS rules and link team members
+   * (org/team → owner) where derivable. Service-level OWNS edges are added
+   * for any service whose directory matches a rule pattern that's a prefix.
+   */
+  private emitOwnerNodes(
+    nodes: GraphNode[],
+    relationships: GraphRelationship[],
+    services: readonly { name: string; directory: string }[],
+    rules: readonly CodeOwnerRule[],
+  ): void {
+    const seenOwners = new Set<string>();
+    for (const rule of rules) {
+      for (const owner of rule.owners) {
+        const id = this.ownerNodeId(owner);
+        if (seenOwners.has(id)) continue;
+        seenOwners.add(id);
+
+        if (id.startsWith('team:')) {
+          nodes.push({
+            id,
+            label: 'Team',
+            name: owner,
+            properties: { handle: owner },
+          });
+        } else {
+          nodes.push({
+            id,
+            label: 'Owner',
+            name: owner,
+            properties: { handle: owner },
+          });
+        }
+      }
+    }
+
+    // Service-level OWNS — match any rule pattern whose path prefix matches the service directory
+    for (const rule of rules) {
+      const pat = rule.pattern.replace(/^\/+/, '');
+      if (!pat.endsWith('/')) continue;
+      for (const svc of services) {
+        const dir = svc.directory.replace(/^\/+/, '');
+        if (dir.startsWith(pat) || pat.startsWith(dir + '/')) {
+          for (const owner of rule.owners) {
+            relationships.push({
+              type: 'OWNS',
+              sourceId: this.ownerNodeId(owner),
+              targetId: `service:${svc.name}`,
+              confidence: 'HIGH',
+              properties: { source: 'CODEOWNERS', pattern: rule.pattern },
+            });
+          }
+        }
+      }
+    }
+  }
+}

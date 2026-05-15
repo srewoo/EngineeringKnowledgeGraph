@@ -1,0 +1,71 @@
+# ===========================
+# Dependencies
+# ===========================
+node_modules/
+.pnp
+.pnp.js
+
+# ===========================
+# Build output
+# ===========================
+dist/
+*.tsbuildinfo
+*.js.map
+
+# ===========================
+# Data — cloned repos, SQLite, indexes
+# ===========================
+data/repos/
+data/indexes/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# ===========================
+# Logs
+# ===========================
+data/*.log
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===========================
+# Environment / Secrets
+# ===========================
+.env
+.env.local
+.env.*.local
+
+# ===========================
+# IDE / Editor
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===========================
+# OS files
+# ===========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===========================
+# Test / Coverage
+# ===========================
+coverage/
+.nyc_output/
+
+# ===========================
+# Miscellaneous
+# ===========================
+*.tgz
+.cache/
+tmp/
+llmPLAN.md
+CLAUDE.md
+prd.md

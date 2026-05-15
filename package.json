@@ -1,0 +1,26 @@
+{
+  "name": "ekg",
+  "version": "0.1.0",
+  "description": "Engineering Knowledge Graph — a compiler for engineering systems",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "tsc --build",
+    "lint": "eslint . --ext .ts",
+    "dev:mcp": "npm run dev -w apps/mcp-server",
+    "dev:worker": "npm run dev -w apps/worker",
+    "clean": "rm -rf packages/*/dist apps/*/dist"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
