@@ -4,24 +4,30 @@
  *
  * Usage:
  *   ekg-eval run [--cases <path>] [--limit N] [--no-agent] [--out <dir>]
+ *   ekg-eval check <summary.json> [--no-agent]
  *
- * Loads eval cases, runs the agent (or retrieval-only with --no-agent), and
- * prints a one-line summary. Per-case JSONL traces are written to <out>/cases.jsonl.
+ * `run` loads cases, runs the agent (or retrieval-only with `--no-agent`),
+ * writes per-case JSONL to `<out>/<runId>/cases.jsonl` and a roll-up to
+ * `<out>/<runId>/summary.json`, then prints a one-line summary.
  *
- * NOTE: when --no-agent is passed (or building an agent fails) the runner
- * scores classifier accuracy only — citation/faithfulness will be zero.
+ * `check` loads a summary.json from a previous run and exits non-zero when
+ * any threshold is violated. Same gate used by CI and locally.
  */
 
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { createLogger } from '@ekg/shared';
 import { loadCasesFromFile } from './cases.loader.js';
 import { runEval } from './eval.runner.js';
 import type { EvalAgent, EvalAgentResult } from './eval.runner.js';
+import type { EvalRun } from './eval.types.js';
+import { enforce, readThresholdsFromEnv } from './thresholds.js';
+import { tryBuildBm25Agent } from './bm25.agent.js';
 
 interface ParsedArgs {
   readonly command: string;
+  readonly positional: readonly string[];
   readonly casesPath?: string;
   readonly limit?: number;
   readonly noAgent: boolean;
@@ -31,6 +37,7 @@ interface ParsedArgs {
 function parseArgs(argv: readonly string[]): ParsedArgs {
   const args = argv.slice(2);
   const command = args[0] ?? 'run';
+  const positional: string[] = [];
   let casesPath: string | undefined;
   let limit: number | undefined;
   let noAgent = false;
@@ -41,9 +48,10 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
     else if (a === '--limit') { limit = Number(args[i + 1]); i += 1; }
     else if (a === '--no-agent') { noAgent = true; }
     else if (a === '--out') { out = args[i + 1]; i += 1; }
+    else if (a && !a.startsWith('--')) { positional.push(a); }
   }
   return {
-    command,
+    command, positional,
     ...(casesPath ? { casesPath } : {}),
     ...(typeof limit === 'number' && Number.isFinite(limit) ? { limit } : {}),
     noAgent,
@@ -52,33 +60,59 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 }
 
 function defaultCasesPath(): string {
-  // Resolve relative to the dist/ output: dist/cli.js -> ../eval-set/cases.json
   const here = dirname(fileURLToPath(import.meta.url));
   return resolve(here, '..', 'eval-set', 'cases.json');
 }
 
-async function main(): Promise<void> {
+async function cmdRun(args: ParsedArgs): Promise<void> {
   const logger = createLogger({ service: 'ekg-eval' });
-  const args = parseArgs(process.argv);
-
-  if (args.command !== 'run') {
-    process.stderr.write(`unknown command: ${args.command}\nusage: ekg-eval run [--cases path] [--limit N] [--no-agent] [--out dir]\n`);
-    process.exit(2);
-  }
-
   const casesPath = args.casesPath ?? defaultCasesPath();
   const cases = loadCasesFromFile(casesPath);
   logger.info({ casesPath, count: cases.length }, 'loaded eval cases');
 
-  const agent: EvalAgent | null = args.noAgent ? null : buildAgentOrNull(logger);
+  const agent: EvalAgent | null = args.noAgent
+    ? buildBm25AgentOrNull(logger)
+    : buildAgentOrNull(logger);
 
   const opts = {
     ...(args.limit !== undefined ? { limit: args.limit } : {}),
-    ...(args.out ? { outDir: args.out } : {}),
+    ...(args.out ? { outDir: join(args.out, `eval-${Date.now()}`) } : {}),
   };
   const { run } = await runEval(cases, agent, opts);
 
-  const summary = [
+  // Write summary.json next to per-case JSONL so `ekg-eval check` can find it.
+  const summaryPath = opts.outDir ? join(opts.outDir, 'summary.json') : undefined;
+  if (summaryPath) {
+    writeFileSync(summaryPath, `${JSON.stringify(run, null, 2)}\n`, 'utf8');
+    logger.info({ summaryPath }, 'wrote summary.json');
+  }
+
+  process.stdout.write(`${formatSummary(run)}\n`);
+  if (summaryPath) process.stdout.write(`summary=${summaryPath}\n`);
+}
+
+function cmdCheck(args: ParsedArgs): void {
+  const summaryPath = args.positional[0];
+  if (!summaryPath) {
+    process.stderr.write('usage: ekg-eval check <summary.json>\n');
+    process.exit(2);
+  }
+  const raw = readFileSync(summaryPath, 'utf8');
+  const run = JSON.parse(raw) as EvalRun;
+  const thresholds = readThresholdsFromEnv();
+  const result = enforce(run, thresholds);
+
+  process.stdout.write(`${formatSummary(run)}\n`);
+  process.stdout.write(`thresholds=${JSON.stringify(thresholds)}\n`);
+  if (!result.ok) {
+    for (const r of result.reasons) process.stderr.write(`gate-failed: ${r}\n`);
+    process.exit(1);
+  }
+  process.stdout.write('gate-passed\n');
+}
+
+function formatSummary(run: EvalRun): string {
+  return [
     `runId=${run.runId}`,
     `cases=${run.cases}`,
     `passed=${run.passed}`,
@@ -88,8 +122,26 @@ async function main(): Promise<void> {
     `faithfulness=${run.faithfulness}`,
     run.answerRelevance !== undefined ? `fluency=${run.answerRelevance}` : '',
   ].filter((s) => s.length > 0).join(' ');
+}
 
-  process.stdout.write(`${summary}\n`);
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv);
+  if (args.command === 'run') return cmdRun(args);
+  if (args.command === 'check') return cmdCheck(args);
+  process.stderr.write(`unknown command: ${args.command}\nusage: ekg-eval (run|check) ...\n`);
+  process.exit(2);
+}
+
+function buildBm25AgentOrNull(logger: ReturnType<typeof createLogger>): EvalAgent | null {
+  const dataDir = resolve(process.env['DATA_DIR'] ?? join(process.cwd(), 'data'));
+  const dbPath = join(dataDir, 'ekg-search.db');
+  const agent = tryBuildBm25Agent(dbPath);
+  if (!agent) {
+    logger.warn({ dbPath }, 'BM25 search index not found; running classifier-only');
+    return null;
+  }
+  logger.info({ dbPath }, 'using BM25 retrieval-only agent');
+  return agent;
 }
 
 function buildAgentOrNull(logger: ReturnType<typeof createLogger>): EvalAgent | null {
@@ -97,11 +149,10 @@ function buildAgentOrNull(logger: ReturnType<typeof createLogger>): EvalAgent | 
   // search infra wired up. Surface a clear message and fall back to
   // retrieval-only mode so the harness remains useful in CI without infra.
   logger.warn('CLI agent wiring is not bundled; running retrieval-only. Use the MCP tool eval_run for full agent runs.');
-  void evalAgentSatisfiesType; // silence unused
+  void evalAgentSatisfiesType;
   return null;
 }
 
-// Compile-time assertion that the EvalAgentResult shape stays stable.
 const evalAgentSatisfiesType: EvalAgentResult = {
   status: 'refused',
   citations: [],

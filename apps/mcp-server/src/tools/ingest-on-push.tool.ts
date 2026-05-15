@@ -5,8 +5,13 @@
  * (env: EKG_WEBHOOK_REPO_PATTERNS, comma-separated). On match, enqueues an
  * incremental ingest via IngestionService.ingest. Otherwise rejects.
  *
- * This is a *stub*. A full GitLab webhook receiver belongs in a dedicated
- * HTTP server, not the MCP transport. Track that as a follow-up.
+ * SUPERSEDED by `apps/webhook-server` (Phase 4 follow-up). The HTTP receiver
+ * there handles real GitLab push events with shared-secret auth, payload
+ * validation, allow-list, per-repo locks, and a global concurrency cap.
+ *
+ * This MCP tool is retained as an operator-driven manual trigger — useful for
+ * forcing an incremental ingest from an MCP client (e.g. Claude Code) without
+ * issuing an HTTP request.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

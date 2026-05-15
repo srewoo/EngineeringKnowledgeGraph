@@ -1,0 +1,67 @@
+name: eval-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  eval:
+    name: ekg-eval threshold gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Retrieval-only mode — no LLM, no embeddings. Deterministic + fast.
+      EKG_AGENT_ENABLED: 'false'
+      EKG_EMBEDDINGS_ENABLED: 'false'
+      # Threshold floors for the gate. Tuned for retrieval-only mode on a
+      # single seeded synthetic corpus. Tighten as the corpus and agent grow.
+      EKG_EVAL_MIN_CLASSIFIER_ACC: '0.85'
+      EKG_EVAL_MIN_CITATION_PRECISION: '0.30'
+      EKG_EVAL_MIN_CITATION_RECALL: '0.20'
+      EKG_EVAL_MIN_PASS_RATE: '0.50'
+      DATA_DIR: ${{ github.workspace }}/data
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Seed local corpus (synthetic)
+        run: npx tsx packages/eval/src/seed.ts
+        env:
+          DATA_DIR: ${{ github.workspace }}/data
+
+      - name: Run eval
+        run: npx tsx packages/eval/src/cli.ts run --no-agent --limit 40 --out ci-out
+        env:
+          DATA_DIR: ${{ github.workspace }}/data
+
+      - name: Resolve summary.json path
+        id: resolve
+        run: |
+          summary=$(ls -1 ci-out/*/summary.json | head -n 1)
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+      - name: Check thresholds
+        run: npx tsx packages/eval/src/cli.ts check "${{ steps.resolve.outputs.summary }}"
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-output
+          path: ci-out/
+          retention-days: 14
