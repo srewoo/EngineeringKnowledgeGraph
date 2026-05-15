@@ -247,6 +247,34 @@ export const commitNodeSchema = z.object({
   parentShas: z.array(z.string()),
 });
 
+// -- Config & Secret Schemas (Phase 1.6) --
+
+export const configKindSchema = z.enum(['HELM', 'K8S', 'ENV', 'CI', 'APP']);
+
+export const secretVendorSchema = z.enum([
+  'VAULT', 'AWS_SM', 'AWS_PARAMS', 'GCP_SECRETS', 'AZURE_KV', 'K8S_SECRET', 'UNKNOWN',
+]);
+
+export const configKeyNodeSchema = z.object({
+  key: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  sourceLine: z.number().int().nonnegative(),
+  kind: configKindSchema,
+  defaultValue: z.string().optional(),
+  envScope: z.string().optional(),
+  isSecret: z.boolean(),
+  raw: z.string().optional(),
+});
+
+export const secretRefNodeSchema = z.object({
+  vendor: secretVendorSchema,
+  ref: z.string().min(1),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  sourceLine: z.number().int().nonnegative(),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;

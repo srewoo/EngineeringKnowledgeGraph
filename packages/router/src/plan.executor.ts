@@ -142,6 +142,12 @@ async function runGraph(
   if (key === 'commits') {
     params['entity'] = extractFilePathHint(question);
   }
+  if (key === 'config') {
+    // Allow either a file-path hint or an UPPER_SNAKE env-var name to scope
+    // the ConfigKey lookup. Empty string lets the template fall back to the
+    // service-name path.
+    params['entity'] = extractConfigEntityHint(question);
+  }
   return runGraphRaw(tpl.cypher, params, deps, logger);
 }
 
@@ -155,6 +161,16 @@ function extractFilePathHint(question: string): string {
   // Match tokens that look like a/b/c or a/b/c.ext
   const m = question.match(/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,}/);
   return m ? m[0] : '';
+}
+
+/**
+ * Pick the most plausible config-entity token: an UPPER_SNAKE env-var name
+ * (e.g. `DATABASE_URL`) or, failing that, a file-path hint. Returns "".
+ */
+function extractConfigEntityHint(question: string): string {
+  const env = question.match(/\b[A-Z][A-Z0-9_]{3,}\b/);
+  if (env) return env[0];
+  return extractFilePathHint(question);
 }
 
 async function runGraphRaw(

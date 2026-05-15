@@ -53,6 +53,16 @@ describe('cypher templates', () => {
     expect(getTemplate('config').cypher).toMatch(/READS_CONFIG/);
   });
 
+  it('config template returns ConfigKey + SecretRef shape with $entity fallback', () => {
+    const c = getTemplate('config').cypher;
+    expect(c).toMatch(/:ConfigKey/);
+    expect(c).toMatch(/:SecretRef/);
+    expect(c).toMatch(/USES_SECRET/);
+    expect(c).toMatch(/\$serviceNames/);
+    expect(c).toMatch(/\$entity/);
+    expect(c).toMatch(/LIMIT 30/);
+  });
+
   it('kafka template covers PRODUCES and CONSUMES', () => {
     const c = getTemplate('kafka').cypher;
     expect(c).toMatch(/PRODUCES/);

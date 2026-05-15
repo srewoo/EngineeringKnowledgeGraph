@@ -279,6 +279,13 @@ export class GraphRepository {
         'CREATE INDEX IF NOT EXISTS FOR (n:TypeDef) ON (n.id)',
         'CREATE INDEX IF NOT EXISTS FOR (n:TypeDef) ON (n.repoUrl)',
         'CREATE INDEX IF NOT EXISTS FOR (n:TypeDef) ON (n.name)',
+        // Phase 1.6 — config & secret indexes
+        'CREATE INDEX IF NOT EXISTS FOR (n:ConfigKey) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:ConfigKey) ON (n.key)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:ConfigKey) ON (n.repoUrl)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.id)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.vendor)',
+        'CREATE INDEX IF NOT EXISTS FOR (n:SecretRef) ON (n.ref)',
       ];
       for (const query of indexes) {
         await session.run(query);

@@ -28,6 +28,12 @@ import { MarkdownExtractor } from './markdown.extractor.js';
 import { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
 import { OpenApiExtractor } from './openapi.extractor.js';
 import { SymbolsExtractor } from './symbols.extractor.js';
+import { HelmValuesExtractor } from './helm.values.extractor.js';
+import { K8sManifestExtractor } from './k8s.manifest.extractor.js';
+import { DotenvExtractor } from './dotenv.extractor.js';
+import { CiVarsExtractor } from './ci.vars.extractor.js';
+import { AppConfigExtractor } from './app.config.extractor.js';
+import type { ConfigKeyNode, SecretRefNode } from '@ekg/shared';
 
 const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -44,6 +50,11 @@ export class ExtractionPipeline {
   private readonly prismaExtractor: SchemaPrismaExtractor;
   private readonly openApiExtractor: OpenApiExtractor;
   private readonly symbolsExtractor: SymbolsExtractor;
+  private readonly helmExtractor: HelmValuesExtractor;
+  private readonly k8sExtractor: K8sManifestExtractor;
+  private readonly dotenvExtractor: DotenvExtractor;
+  private readonly ciVarsExtractor: CiVarsExtractor;
+  private readonly appConfigExtractor: AppConfigExtractor;
   private readonly logger: Logger;
 
   constructor() {
@@ -59,6 +70,11 @@ export class ExtractionPipeline {
     this.prismaExtractor = new SchemaPrismaExtractor();
     this.openApiExtractor = new OpenApiExtractor();
     this.symbolsExtractor = new SymbolsExtractor();
+    this.helmExtractor = new HelmValuesExtractor();
+    this.k8sExtractor = new K8sManifestExtractor();
+    this.dotenvExtractor = new DotenvExtractor();
+    this.ciVarsExtractor = new CiVarsExtractor();
+    this.appConfigExtractor = new AppConfigExtractor();
     this.logger = createLogger({ service: 'extraction-pipeline' });
   }
 
@@ -304,6 +320,16 @@ export class ExtractionPipeline {
       repoUrl,
       servicesByDirLen,
       handledSpecPaths,
+      allNodes,
+      allRelationships,
+    );
+
+    // Step 3.7: Phase 1.6 — config & secret extraction across Helm,
+    // K8s manifests, dotenv templates, CI workflows, and app configs.
+    await this.extractConfigsAndSecrets(
+      files,
+      repoUrl,
+      servicesByDirLen,
       allNodes,
       allRelationships,
     );
@@ -674,6 +700,109 @@ export class ExtractionPipeline {
         allNodes,
         allRelationships,
       );
+    }
+  }
+
+  /**
+   * Phase 1.6 — route every scanned file through the appropriate config /
+   * secret extractor and emit ConfigKey / SecretRef nodes plus
+   * Service-[READS_CONFIG|USES_SECRET]-> edges.
+   *
+   * Order matters: more specific path-based detectors run first (Helm, K8s,
+   * CI, app config), and dotenv templates are matched by basename. Files
+   * that match nothing fall through to the existing pipeline.
+   */
+  private async extractConfigsAndSecrets(
+    files: readonly { absolutePath: string; relativePath: string }[],
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    for (const file of files) {
+      const route = this.routeConfigFile(file.relativePath);
+      if (!route) continue;
+      let content: string;
+      try {
+        content = await readFile(file.absolutePath, 'utf8');
+      } catch (err) {
+        this.logger.warn({ err, path: file.relativePath }, 'Failed to read config file');
+        continue;
+      }
+      const result = this.runConfigExtractor(route, content, file.relativePath, repoUrl);
+      if (result.configKeys.length === 0 && result.secretRefs.length === 0) continue;
+
+      const owningService = this.findServiceForFile(file.relativePath, servicesByDirLen);
+      this.emitConfigNodes(result, owningService?.name, allNodes, allRelationships);
+    }
+  }
+
+  private routeConfigFile(relativePath: string):
+    | 'helm' | 'k8s' | 'dotenv' | 'ci' | 'app' | undefined {
+    if (DotenvExtractor.handlesByPath(relativePath)) return 'dotenv';
+    if (CiVarsExtractor.handlesByPath(relativePath)) return 'ci';
+    if (HelmValuesExtractor.handlesByPath(relativePath)) return 'helm';
+    if (K8sManifestExtractor.handlesByPath(relativePath)) return 'k8s';
+    if (AppConfigExtractor.handlesByPath(relativePath)) return 'app';
+    return undefined;
+  }
+
+  private runConfigExtractor(
+    route: 'helm' | 'k8s' | 'dotenv' | 'ci' | 'app',
+    content: string,
+    relativePath: string,
+    repoUrl: string,
+  ): { configKeys: readonly ConfigKeyNode[]; secretRefs: readonly SecretRefNode[] } {
+    switch (route) {
+      case 'helm': return this.helmExtractor.extract(content, relativePath, repoUrl);
+      case 'k8s':  return this.k8sExtractor.extract(content, relativePath, repoUrl);
+      case 'dotenv': {
+        const r = this.dotenvExtractor.extract(content, relativePath, repoUrl);
+        return { configKeys: r.configKeys, secretRefs: [] };
+      }
+      case 'ci':   return this.ciVarsExtractor.extract(content, relativePath, repoUrl);
+      case 'app': {
+        const r = this.appConfigExtractor.extract(content, relativePath, repoUrl);
+        return { configKeys: r.configKeys, secretRefs: [] };
+      }
+    }
+  }
+
+  private emitConfigNodes(
+    result: { configKeys: readonly ConfigKeyNode[]; secretRefs: readonly SecretRefNode[] },
+    serviceName: string | undefined,
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): void {
+    for (const ck of result.configKeys) {
+      allNodes.push(ck);
+      if (serviceName) {
+        allRelationships.push({
+          type: 'READS_CONFIG',
+          sourceId: `service:${serviceName}`,
+          targetId: ck.id,
+          confidence: 'HIGH',
+          properties: {
+            kind: ck.properties.kind,
+            sourceFile: ck.properties.filePath,
+          },
+        });
+      }
+    }
+    for (const sr of result.secretRefs) {
+      allNodes.push(sr);
+      if (serviceName) {
+        allRelationships.push({
+          type: 'USES_SECRET',
+          sourceId: `service:${serviceName}`,
+          targetId: sr.id,
+          confidence: 'HIGH',
+          properties: {
+            vendor: sr.properties.vendor,
+            sourceFile: sr.properties.filePath,
+          },
+        });
+      }
     }
   }
 

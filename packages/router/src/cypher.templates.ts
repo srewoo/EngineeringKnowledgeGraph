@@ -63,15 +63,40 @@ const TEMPLATES: Readonly<Record<CypherTemplateKey, CypherTemplate>> = Object.fr
     `.trim(),
   },
   config: {
+    // Phase 1.6 — return ConfigKey nodes (and any USES_SECRET edges) for a
+    // resolved service OR for any key whose name CONTAINS the `$entity`
+    // substring. Capped at 30 rows to keep traversal bounded.
     key: 'config',
-    description: 'Service → ConfigKey list.',
+    description: 'ConfigKey + SecretRef nodes for a service, or by key-name substring.',
     cypher: `
-      MATCH (s:Service)
-      WHERE toLower(s.name) IN $serviceNames
-      OPTIONAL MATCH (s)-[:READS_CONFIG]->(c)
-      RETURN s.name AS service,
-             collect(DISTINCT { id: coalesce(c.id, ''), name: coalesce(c.name, ''), source: coalesce(c.source, '') }) AS configs
-      LIMIT 25
+      OPTIONAL MATCH (svc:Service)
+        WHERE toLower(svc.name) IN $serviceNames
+      OPTIONAL MATCH (svc)-[:READS_CONFIG]->(svcKey:ConfigKey)
+      OPTIONAL MATCH (svc)-[:USES_SECRET]->(svcSecret:SecretRef)
+      WITH svc,
+           collect(DISTINCT svcKey) AS svcKeys,
+           collect(DISTINCT svcSecret) AS svcSecrets
+      OPTIONAL MATCH (k:ConfigKey)
+        WHERE $entity <> ''
+          AND (toLower(k.key) CONTAINS toLower($entity)
+               OR toLower(coalesce(k.name, '')) CONTAINS toLower($entity))
+      WITH svc, svcKeys, svcSecrets,
+           collect(DISTINCT k) AS keyMatches
+      WITH svc, svcKeys + keyMatches AS allKeys, svcSecrets
+      UNWIND (CASE WHEN size(allKeys) = 0 THEN [null] ELSE allKeys END) AS ck
+      WITH svc, ck, svcSecrets, allKeys
+      RETURN coalesce(svc.name, '') AS service,
+             [k IN allKeys WHERE k IS NOT NULL |
+               { id: k.id,
+                 key: k.key,
+                 kind: k.kind,
+                 envScope: coalesce(k.envScope, ''),
+                 defaultValue: coalesce(k.defaultValue, ''),
+                 isSecret: coalesce(k.isSecret, false),
+                 filePath: k.filePath }] AS configKeys,
+             [s IN svcSecrets WHERE s IS NOT NULL |
+               { id: s.id, vendor: s.vendor, ref: s.ref, filePath: s.filePath }] AS secretRefs
+      LIMIT 30
     `.trim(),
   },
   kafka: {

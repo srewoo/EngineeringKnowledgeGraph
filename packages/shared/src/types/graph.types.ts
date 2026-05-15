@@ -6,6 +6,8 @@
  * connecting them with semantic meaning.
  */
 
+import type { ConfigKind, SecretVendor } from '../constants.js';
+
 // -- Edge Confidence --
 
 export type EdgeConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -40,7 +42,9 @@ export type NodeLabel =
   | 'Class'
   | 'Method'
   | 'TypeDef'
-  | 'Commit';
+  | 'Commit'
+  | 'ConfigKey'
+  | 'SecretRef';
 
 // -- Relationship Types --
 
@@ -67,7 +71,8 @@ export type RelationshipType =
   | 'CONSUMES'
   | 'CALLS_API'
   | 'OWNED_BY'
-  | 'TOUCHED';
+  | 'TOUCHED'
+  | 'USES_SECRET';
 
 // -- Base Node --
 
@@ -333,6 +338,49 @@ export interface CommitNode extends GraphNode {
     message: string;
     authoredAt: string;
     parentShas: readonly string[];
+  }>;
+}
+
+// -- Config & Secret Nodes (Phase 1.6) --
+
+/**
+ * A single configuration key — finer-grained than `Config` (file-level).
+ * Captures the *reference* and *default*, never the resolved runtime value.
+ */
+export interface ConfigKeyNode extends GraphNode {
+  readonly label: 'ConfigKey';
+  readonly properties: Readonly<{
+    key: string;
+    repoUrl: string;
+    filePath: string;
+    sourceLine: number;
+    kind: ConfigKind;
+    /** Default literal lifted from the source — may be empty string. */
+    defaultValue?: string;
+    /** Environment qualifier inferred from filename suffix, e.g. `prod`, `staging`. */
+    envScope?: string;
+    /** Heuristic — true when the key name suggests a secret. Never set from a resolved value. */
+    isSecret: boolean;
+    /** Original raw fragment for provenance. Bounded length. */
+    raw?: string;
+  }>;
+}
+
+/**
+ * A reference to a secret stored in an external vault. Captures the path /
+ * ARN / URI only — never the secret material itself.
+ */
+export interface SecretRefNode extends GraphNode {
+  readonly label: 'SecretRef';
+  readonly properties: Readonly<{
+    vendor: SecretVendor;
+    /** Vendor-native reference: e.g. `vault:secret/data/users#api_key`,
+     *  `arn:aws:secretsmanager:us-east-1:123:secret:foo-AbCdEf`,
+     *  `k8s:my-secret#API_KEY`. */
+    ref: string;
+    repoUrl: string;
+    filePath: string;
+    sourceLine: number;
   }>;
 }
 

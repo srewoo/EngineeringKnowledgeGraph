@@ -17,6 +17,7 @@ export const NODE_LABELS: readonly NodeLabel[] = [
   'Table', 'Column', 'Migration',
   'Function', 'Class', 'Method', 'TypeDef',
   'Commit',
+  'ConfigKey', 'SecretRef',
 ] as const;
 
 // -- Relationship Types --
@@ -29,7 +30,35 @@ export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'DEFINES', 'EXTENDS',
   'PRODUCES', 'CONSUMES', 'CALLS_API',
   'OWNED_BY', 'TOUCHED',
+  'USES_SECRET',
 ] as const;
+
+// -- Config Kind / Secret Vendor (Phase 1.6) --
+
+/**
+ * Source of a `ConfigKey` node — drives how downstream consumers interpret
+ * `defaultValue` and `envScope`.
+ *
+ * - `HELM`  — Helm `values.yaml` (and `values.<env>.yaml` overrides).
+ * - `K8S`   — Kubernetes manifest env / envFrom / ConfigMap entries.
+ * - `ENV`   — `.env.example` / `.env.template` / `.env.sample` templates only.
+ *             Plain `.env` is NEVER parsed (risk of leaking real secrets).
+ * - `CI`    — GitHub Actions / GitLab CI variables.
+ * - `APP`   — Spring `application.yaml` / `application.properties`,
+ *             .NET `appsettings.json`, generic `config.json`.
+ */
+export const CONFIG_KIND = ['HELM', 'K8S', 'ENV', 'CI', 'APP'] as const;
+export type ConfigKind = typeof CONFIG_KIND[number];
+
+/**
+ * Source of a `SecretRef` node — the secret-management vendor whose
+ * URI/path is captured in `ref`. `UNKNOWN` covers generic Vault-like
+ * placeholders we cannot confidently classify.
+ */
+export const SECRET_VENDOR = [
+  'VAULT', 'AWS_SM', 'AWS_PARAMS', 'GCP_SECRETS', 'AZURE_KV', 'K8S_SECRET', 'UNKNOWN',
+] as const;
+export type SecretVendor = typeof SECRET_VENDOR[number];
 
 /** Hard cap for cyclomatic complexity counting — prevents pathological files. */
 export const MAX_CYCLOMATIC_COMPLEXITY = 50;

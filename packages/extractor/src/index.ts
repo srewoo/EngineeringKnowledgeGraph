@@ -17,6 +17,16 @@ export type {
   CodeownersExtractionResult,
 } from './codeowners.extractor.js';
 export { UrlApiResolver } from './url.api.resolver.js';
+export { HelmValuesExtractor } from './helm.values.extractor.js';
+export type { HelmExtractionResult } from './helm.values.extractor.js';
+export { K8sManifestExtractor } from './k8s.manifest.extractor.js';
+export type { K8sExtractionResult } from './k8s.manifest.extractor.js';
+export { DotenvExtractor } from './dotenv.extractor.js';
+export type { DotenvExtractionResult } from './dotenv.extractor.js';
+export { CiVarsExtractor } from './ci.vars.extractor.js';
+export type { CiVarsExtractionResult } from './ci.vars.extractor.js';
+export { AppConfigExtractor } from './app.config.extractor.js';
+export type { AppConfigExtractionResult } from './app.config.extractor.js';
 export type {
   HttpCallInput,
   ApiCandidate,
