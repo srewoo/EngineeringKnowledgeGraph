@@ -12,3 +12,5 @@ export type { IngestionOptions } from './ingestion.service.js';
 export { BulkIngestionService } from './bulk.ingestion.js';
 export type { BulkIngestionProgress } from './bulk.ingestion.js';
 export { ServiceResolver } from './service.resolver.js';
+export { EmbeddingsService } from './embeddings.service.js';
+export type { EmbeddingsServiceOptions } from './embeddings.service.js';

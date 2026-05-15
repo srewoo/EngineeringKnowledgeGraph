@@ -23,6 +23,7 @@ import { ExtractionPipeline } from '@ekg/extractor';
 import { TypeScriptParserPool, MultiLanguageParser } from '@ekg/parser';
 import { ImportExtractor } from '@ekg/extractor';
 import { RepoCloner } from './repo.cloner.js';
+import { EmbeddingsService } from './embeddings.service.js';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -60,12 +61,14 @@ export class IngestionService {
   private readonly extractor: ImportExtractor;
   private readonly graphRepo: GraphRepository;
   private readonly sqliteRepo: SqliteRepository;
+  private readonly embeddingsService?: EmbeddingsService;
   private readonly logger: Logger;
 
   constructor(
     dataDir: string,
     neo4jClient: Neo4jClient,
     sqliteRepo: SqliteRepository,
+    embeddingsService?: EmbeddingsService,
   ) {
     this.cloner = new RepoCloner(dataDir);
     this.pipeline = new ExtractionPipeline();
@@ -74,6 +77,7 @@ export class IngestionService {
     this.extractor = new ImportExtractor();
     this.graphRepo = new GraphRepository(neo4jClient);
     this.sqliteRepo = sqliteRepo;
+    this.embeddingsService = embeddingsService;
     this.logger = createLogger({ service: 'ingestion-service' });
   }
 
@@ -171,6 +175,16 @@ export class IngestionService {
     const nodesCreated = await this.graphRepo.mergeNodes(extraction.nodes);
     const edgesCreated = await this.graphRepo.mergeRelationships(extraction.relationships);
 
+    // Best-effort embeddings — never fails the ingest.
+    if (this.embeddingsService?.enabled) {
+      await this.embeddingsService.embedFromExtraction(
+        options.repoUrl,
+        localPath,
+        extraction.nodes,
+        extraction.relationships,
+      );
+    }
+
     this.sqliteRepo.updateJobStatus(jobId, 'COMPLETED', {
       commitSha: currentSha,
       filesProcessed: extraction.nodes.filter((n) => n.label === 'File').length,
@@ -259,6 +273,16 @@ export class IngestionService {
 
     // Repo-scoped orphan cleanup (no full-graph scan)
     await this.graphRepo.cleanupOrphans(options.repoUrl);
+
+    // Best-effort embeddings on the freshly re-parsed nodes only.
+    if (this.embeddingsService?.enabled) {
+      await this.embeddingsService.embedFromExtraction(
+        options.repoUrl,
+        localPath,
+        allNodes,
+        allRels,
+      );
+    }
 
     this.sqliteRepo.updateJobStatus(jobId, 'COMPLETED', {
       commitSha: currentSha,

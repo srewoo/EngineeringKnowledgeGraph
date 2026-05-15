@@ -11,6 +11,7 @@ import { Neo4jClient } from '@ekg/graph';
 import { GraphQueries } from '@ekg/graph';
 import { SqliteRepository } from '@ekg/storage';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
+import type { EmbeddingsService } from '@ekg/worker';
 import type { Logger } from '@ekg/shared';
 
 // Tools
@@ -29,6 +30,7 @@ import { registerResolveServicesTool } from './tools/resolve-services.tool.js';
 import { registerRetryFailedTool } from './tools/retry-failed.tool.js';
 import { registerCypherQueryTool } from './tools/cypher-query.tool.js';
 import { registerGetMetricsTool } from './tools/get-metrics.tool.js';
+import { registerSearchSemanticTool } from './tools/search-semantic.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -45,6 +47,7 @@ export interface ServerDependencies {
   readonly ingestionService: IngestionService;
   readonly bulkService: BulkIngestionService;
   readonly serviceResolver: ServiceResolver;
+  readonly embeddingsService?: EmbeddingsService;
   readonly gitlabConfig: {
     readonly gitlabUrl: string;
     readonly token: string;
@@ -83,6 +86,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerRetryFailedTool(server, deps.sqliteRepo, deps.ingestionService, deps.gitlabConfig.token);
   registerCypherQueryTool(server, deps.neo4jClient);
   registerGetMetricsTool(server, deps.neo4jClient);
+  registerSearchSemanticTool(server, deps.embeddingsService);
 
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);
@@ -93,7 +97,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 15 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 16 tools, 4 resources, 2 prompts');
 
   return server;
 }

@@ -25,6 +25,7 @@
     { "path": "packages/graph" },
     { "path": "packages/parser" },
     { "path": "packages/extractor" },
+    { "path": "packages/embeddings" },
     { "path": "apps/worker" },
     { "path": "apps/mcp-server" }
   ],

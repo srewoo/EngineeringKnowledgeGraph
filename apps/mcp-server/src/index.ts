@@ -20,7 +20,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
 import { SqliteRepository } from '@ekg/storage';
-import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
+import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService } from '@ekg/worker';
 import { createMcpServer } from './server.js';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -76,7 +76,20 @@ async function main(): Promise<void> {
 
   // Initialise services
   const graphQueries = new GraphQueries(neo4jClient);
-  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo);
+
+  // Embeddings — opt-in via EKG_EMBEDDINGS_ENABLED=true. Stored in a sibling
+  // SQLite file so the main metadata DB stays small and a wiped embeddings
+  // store does not affect ingestion bookkeeping.
+  const embeddingsEnabled = (process.env['EKG_EMBEDDINGS_ENABLED'] ?? 'false').toLowerCase() === 'true';
+  const embeddingsService = new EmbeddingsService({
+    enabled: embeddingsEnabled,
+    dbPath: join(env.dataDir, 'ekg-embeddings.db'),
+  });
+  if (embeddingsEnabled) {
+    logger.info('Embeddings enabled (EKG_EMBEDDINGS_ENABLED=true)');
+  }
+
+  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo, embeddingsService);
   const bulkService = new BulkIngestionService(ingestionService, sqliteRepo, env.ingestTimeoutMs);
   const serviceResolver = new ServiceResolver(neo4jClient);
 
@@ -111,6 +124,7 @@ async function main(): Promise<void> {
     ingestionService,
     bulkService,
     serviceResolver,
+    embeddingsService,
     gitlabConfig: {
       gitlabUrl: env.gitlabUrl,
       token: env.gitToken ?? '',
@@ -137,6 +151,7 @@ async function main(): Promise<void> {
       logger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Bulk drain failed');
     }
     try { await ingestionService.close(); } catch { /* ignore */ }
+    try { embeddingsService.close(); } catch { /* ignore */ }
     try { sqliteRepo.close(); } catch { /* ignore */ }
     try { await neo4jClient.close(); } catch { /* ignore */ }
     logger.info('Shutdown complete');
