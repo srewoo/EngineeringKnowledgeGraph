@@ -14,6 +14,7 @@ export const NODE_LABELS: readonly NodeLabel[] = [
   'Service', 'API', 'Database', 'Repo', 'File',
   'Module', 'Config', 'MessageQueue', 'Feature', 'TestCase',
   'Owner', 'Team', 'Doc',
+  'Table', 'Column', 'Migration',
 ] as const;
 
 // -- Relationship Types --
@@ -22,6 +23,7 @@ export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'IMPORTS', 'EXPORTS', 'USES', 'CALLS', 'EXPOSES',
   'CONTAINS', 'DEPENDS_ON', 'READS_CONFIG', 'IMPLEMENTS', 'TESTS',
   'OWNS', 'MEMBER_OF', 'DOCUMENTED_BY',
+  'HAS', 'ALTERS', 'RELATES_TO',
 ] as const;
 
 /** Doc kinds — heuristic classification of markdown / docs files. */
@@ -76,7 +78,7 @@ export const DEFAULT_SUPPORTED_EXTENSIONS: readonly string[] = [
   // Shell / scripting
   '.sh', '.bash', '.zsh', '.ps1',
   // Schema / IDL
-  '.graphql', '.gql', '.proto', '.thrift',
+  '.graphql', '.gql', '.proto', '.thrift', '.prisma',
   // Config / data
   '.json', '.yaml', '.yml', '.toml', '.ini', '.env',
   // Infra

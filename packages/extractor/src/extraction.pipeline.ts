@@ -6,7 +6,7 @@
  * This is the core IP of the system.
  */
 
-import { extname } from 'node:path';
+import { extname, basename } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createLogger, DOC_EXTENSIONS } from '@ekg/shared';
 import {
@@ -22,6 +22,7 @@ import type { GraphNode, GraphRelationship, ExtractionResult, EkgConfig, Logger 
 import { ImportExtractor } from './import.extractor.js';
 import { ServiceDetector } from './service.detector.js';
 import { MarkdownExtractor } from './markdown.extractor.js';
+import { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
 
 const TS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
 
@@ -35,6 +36,7 @@ export class ExtractionPipeline {
   private readonly importExtractor: ImportExtractor;
   private readonly serviceDetector: ServiceDetector;
   private readonly markdownExtractor: MarkdownExtractor;
+  private readonly prismaExtractor: SchemaPrismaExtractor;
   private readonly logger: Logger;
 
   constructor() {
@@ -47,6 +49,7 @@ export class ExtractionPipeline {
     this.importExtractor = new ImportExtractor();
     this.serviceDetector = new ServiceDetector();
     this.markdownExtractor = new MarkdownExtractor();
+    this.prismaExtractor = new SchemaPrismaExtractor();
     this.logger = createLogger({ service: 'extraction-pipeline' });
   }
 
@@ -112,6 +115,9 @@ export class ExtractionPipeline {
       const batch = files.slice(i, i + concurrency);
       const parsed = await Promise.all(batch.map(async (file) => {
         const ext = extname(file.absolutePath).toLowerCase();
+        if (basename(file.absolutePath) === 'schema.prisma') {
+          return { kind: 'prisma' as const, ext };
+        }
         if (DOC_EXTENSIONS.has(ext)) {
           return { kind: 'doc' as const, ext };
         }
@@ -133,6 +139,17 @@ export class ExtractionPipeline {
 
         if (entry.kind === 'doc') {
           await this.handleDocFile(
+            file,
+            repoUrl,
+            servicesByDirLen,
+            allNodes,
+            allRelationships,
+          );
+          continue;
+        }
+
+        if (entry.kind === 'prisma') {
+          await this.handlePrismaFile(
             file,
             repoUrl,
             servicesByDirLen,
@@ -383,6 +400,71 @@ export class ExtractionPipeline {
         confidence: 'HIGH',
         properties: { source: 'doc-extractor' },
       });
+    }
+  }
+
+  /**
+   * Read a `schema.prisma` file, run SchemaPrismaExtractor, and emit
+   * Table + Column nodes plus File→Table (CONTAINS), Table→Column (HAS),
+   * Table→Table (RELATES_TO), and Service→Table (OWNS) edges.
+   */
+  private async handlePrismaFile(
+    file: { absolutePath: string; relativePath: string },
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    let content: string;
+    try {
+      content = await readFile(file.absolutePath, 'utf8');
+    } catch (err) {
+      this.logger.warn(
+        { err, path: file.relativePath },
+        'Failed to read prisma schema; skipping',
+      );
+      return;
+    }
+
+    const result = this.prismaExtractor.extract(content, file.relativePath, repoUrl);
+    if (result.tables.length === 0) return;
+
+    // Emit a File node for the schema so File→Table (CONTAINS) has a source.
+    const fileId = `${repoUrl}:${file.absolutePath}`;
+    allNodes.push({
+      id: fileId,
+      label: 'File',
+      name: file.relativePath,
+      properties: {
+        path: file.relativePath,
+        language: 'prisma',
+        hash: '',
+        repoUrl,
+      },
+    });
+
+    allNodes.push(...result.tables);
+    allNodes.push(...result.columns);
+    allRelationships.push(...result.relations);
+
+    const owningService = this.findServiceForFile(file.relativePath, servicesByDirLen);
+    for (const table of result.tables) {
+      allRelationships.push({
+        type: 'CONTAINS',
+        sourceId: fileId,
+        targetId: table.id,
+        confidence: 'HIGH',
+        properties: { source: 'prisma-extractor' },
+      });
+      if (owningService) {
+        allRelationships.push({
+          type: 'OWNS',
+          sourceId: `service:${owningService.name}`,
+          targetId: table.id,
+          confidence: 'HIGH',
+          properties: { source: 'prisma-extractor' },
+        });
+      }
     }
   }
 

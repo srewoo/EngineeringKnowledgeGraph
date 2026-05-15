@@ -114,6 +114,36 @@ export const docNodeSchema = z.object({
   format: z.enum(['markdown', 'mdx', 'rst', 'adoc']),
 });
 
+// -- Schema (DB) Node Schemas --
+
+export const tableNodeSchema = z.object({
+  name: z.string().min(1),
+  schema: z.string().optional(),
+  repoUrl: z.string().min(1),
+  filePath: z.string().min(1),
+  sourceLine: z.number().int().nonnegative(),
+  raw: z.string().optional(),
+});
+
+export const columnNodeSchema = z.object({
+  tableId: z.string().min(1),
+  name: z.string().min(1),
+  type: z.string().min(1),
+  nullable: z.boolean(),
+  isPrimary: z.boolean(),
+  isUnique: z.boolean(),
+  isList: z.boolean().optional(),
+  defaultValue: z.string().optional(),
+  mappedName: z.string().optional(),
+});
+
+export const migrationNodeSchema = z.object({
+  name: z.string().min(1),
+  filePath: z.string().min(1),
+  repoUrl: z.string().min(1),
+  appliedAt: z.string().optional(),
+});
+
 // -- Inferred Types --
 
 export type IngestRepoInput = z.infer<typeof ingestRepoInputSchema>;

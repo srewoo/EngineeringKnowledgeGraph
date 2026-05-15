@@ -31,7 +31,10 @@ export type NodeLabel =
   | 'TestCase'
   | 'Owner'
   | 'Team'
-  | 'Doc';
+  | 'Doc'
+  | 'Table'
+  | 'Column'
+  | 'Migration';
 
 // -- Relationship Types --
 
@@ -48,7 +51,10 @@ export type RelationshipType =
   | 'TESTS'
   | 'OWNS'
   | 'MEMBER_OF'
-  | 'DOCUMENTED_BY';
+  | 'DOCUMENTED_BY'
+  | 'HAS'
+  | 'ALTERS'
+  | 'RELATES_TO';
 
 // -- Base Node --
 
@@ -146,6 +152,45 @@ export interface DocNode extends GraphNode {
     codeBlockCount: number;
     linkCount: number;
     format: 'markdown' | 'mdx' | 'rst' | 'adoc';
+  }>;
+}
+
+// -- Schema Nodes (DB tables/columns/migrations) --
+
+export interface TableNode extends GraphNode {
+  readonly label: 'Table';
+  readonly properties: Readonly<{
+    name: string;
+    schema?: string;
+    repoUrl: string;
+    filePath: string;
+    sourceLine: number;
+    raw?: string;
+  }>;
+}
+
+export interface ColumnNode extends GraphNode {
+  readonly label: 'Column';
+  readonly properties: Readonly<{
+    tableId: string;
+    name: string;
+    type: string;
+    nullable: boolean;
+    isPrimary: boolean;
+    isUnique: boolean;
+    isList?: boolean;
+    defaultValue?: string;
+    mappedName?: string;
+  }>;
+}
+
+export interface MigrationNode extends GraphNode {
+  readonly label: 'Migration';
+  readonly properties: Readonly<{
+    name: string;
+    filePath: string;
+    repoUrl: string;
+    appliedAt?: string;
   }>;
 }
 
