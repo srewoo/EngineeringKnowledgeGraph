@@ -6,12 +6,10 @@
     "composite": true
   },
   "references": [
-    { "path": "../../packages/shared" },
-    { "path": "../../packages/storage" },
-    { "path": "../../packages/graph" },
-    { "path": "../../packages/embeddings" },
-    { "path": "../../packages/search" },
-    { "path": "../worker" }
+    { "path": "../shared" },
+    { "path": "../storage" },
+    { "path": "../embeddings" },
+    { "path": "../graph" }
   ],
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "test"]

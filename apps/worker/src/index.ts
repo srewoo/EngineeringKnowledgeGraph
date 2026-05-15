@@ -14,3 +14,5 @@ export type { BulkIngestionProgress } from './bulk.ingestion.js';
 export { ServiceResolver } from './service.resolver.js';
 export { EmbeddingsService } from './embeddings.service.js';
 export type { EmbeddingsServiceOptions } from './embeddings.service.js';
+export { SearchIndexService } from './search-index.service.js';
+export type { SearchIndexServiceOptions } from './search-index.service.js';

@@ -20,7 +20,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
 import { SqliteRepository } from '@ekg/storage';
-import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService } from '@ekg/worker';
+import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService, SearchIndexService } from '@ekg/worker';
 import { createMcpServer } from './server.js';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -89,7 +89,14 @@ async function main(): Promise<void> {
     logger.info('Embeddings enabled (EKG_EMBEDDINGS_ENABLED=true)');
   }
 
-  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo, embeddingsService);
+  // BM25 / FTS5 — always-on, local + free. Stored in a sibling SQLite file
+  // so heavy text indexing does not bloat the metadata DB.
+  const searchIndexDbPath = join(env.dataDir, 'ekg-search.db');
+  const searchIndexService = new SearchIndexService({ dbPath: searchIndexDbPath });
+  const searchTextRepo = searchIndexService.getRepository();
+  logger.info({ searchIndexDbPath }, 'BM25 search index initialised');
+
+  const ingestionService = new IngestionService(env.dataDir, neo4jClient, sqliteRepo, embeddingsService, searchIndexService);
   const bulkService = new BulkIngestionService(ingestionService, sqliteRepo, env.ingestTimeoutMs);
   const serviceResolver = new ServiceResolver(neo4jClient);
 
@@ -125,6 +132,7 @@ async function main(): Promise<void> {
     bulkService,
     serviceResolver,
     embeddingsService,
+    searchTextRepo,
     gitlabConfig: {
       gitlabUrl: env.gitlabUrl,
       token: env.gitToken ?? '',
@@ -152,6 +160,7 @@ async function main(): Promise<void> {
     }
     try { await ingestionService.close(); } catch { /* ignore */ }
     try { embeddingsService.close(); } catch { /* ignore */ }
+    try { searchIndexService.close(); } catch { /* ignore */ }
     try { sqliteRepo.close(); } catch { /* ignore */ }
     try { await neo4jClient.close(); } catch { /* ignore */ }
     logger.info('Shutdown complete');

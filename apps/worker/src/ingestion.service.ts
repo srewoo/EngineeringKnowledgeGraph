@@ -24,6 +24,7 @@ import { TypeScriptParserPool, MultiLanguageParser } from '@ekg/parser';
 import { ImportExtractor } from '@ekg/extractor';
 import { RepoCloner } from './repo.cloner.js';
 import { EmbeddingsService } from './embeddings.service.js';
+import { SearchIndexService } from './search-index.service.js';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -62,6 +63,7 @@ export class IngestionService {
   private readonly graphRepo: GraphRepository;
   private readonly sqliteRepo: SqliteRepository;
   private readonly embeddingsService?: EmbeddingsService;
+  private readonly searchIndexService?: SearchIndexService;
   private readonly logger: Logger;
 
   constructor(
@@ -69,6 +71,7 @@ export class IngestionService {
     neo4jClient: Neo4jClient,
     sqliteRepo: SqliteRepository,
     embeddingsService?: EmbeddingsService,
+    searchIndexService?: SearchIndexService,
   ) {
     this.cloner = new RepoCloner(dataDir);
     this.pipeline = new ExtractionPipeline();
@@ -78,6 +81,7 @@ export class IngestionService {
     this.graphRepo = new GraphRepository(neo4jClient);
     this.sqliteRepo = sqliteRepo;
     this.embeddingsService = embeddingsService;
+    this.searchIndexService = searchIndexService;
     this.logger = createLogger({ service: 'ingestion-service' });
   }
 
@@ -174,6 +178,16 @@ export class IngestionService {
     this.sqliteRepo.updateJobStatus(jobId, 'BUILDING_GRAPH');
     const nodesCreated = await this.graphRepo.mergeNodes(extraction.nodes);
     const edgesCreated = await this.graphRepo.mergeRelationships(extraction.relationships);
+
+    // Best-effort BM25 indexing — always-on, local + free.
+    if (this.searchIndexService) {
+      await this.searchIndexService.indexFromExtraction(
+        options.repoUrl,
+        localPath,
+        extraction.nodes,
+        extraction.relationships,
+      );
+    }
 
     // Best-effort embeddings — never fails the ingest.
     if (this.embeddingsService?.enabled) {
@@ -273,6 +287,16 @@ export class IngestionService {
 
     // Repo-scoped orphan cleanup (no full-graph scan)
     await this.graphRepo.cleanupOrphans(options.repoUrl);
+
+    // Best-effort BM25 indexing on the freshly re-parsed nodes only.
+    if (this.searchIndexService) {
+      await this.searchIndexService.indexFromExtraction(
+        options.repoUrl,
+        localPath,
+        allNodes,
+        allRels,
+      );
+    }
 
     // Best-effort embeddings on the freshly re-parsed nodes only.
     if (this.embeddingsService?.enabled) {

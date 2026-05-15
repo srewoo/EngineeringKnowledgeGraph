@@ -12,6 +12,7 @@ import { GraphQueries } from '@ekg/graph';
 import { SqliteRepository } from '@ekg/storage';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
 import type { EmbeddingsService } from '@ekg/worker';
+import type { SearchTextRepository } from '@ekg/storage';
 import type { Logger } from '@ekg/shared';
 
 // Tools
@@ -48,6 +49,7 @@ export interface ServerDependencies {
   readonly bulkService: BulkIngestionService;
   readonly serviceResolver: ServiceResolver;
   readonly embeddingsService?: EmbeddingsService;
+  readonly searchTextRepo?: SearchTextRepository;
   readonly gitlabConfig: {
     readonly gitlabUrl: string;
     readonly token: string;
@@ -70,7 +72,15 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerIngestRepoTool(server, deps.ingestionService);
   registerListServicesTool(server, deps.graphQueries);
   registerListDatabasesTool(server, deps.graphQueries);
-  registerSearchCodebaseTool(server, deps.graphQueries);
+  if (deps.searchTextRepo) {
+    registerSearchCodebaseTool(server, {
+      searchText: deps.searchTextRepo,
+      ...(deps.embeddingsService ? { embeddingsService: deps.embeddingsService } : {}),
+      neo4jClient: deps.neo4jClient,
+    });
+  } else {
+    logger.warn('search_codebase tool not registered: searchTextRepo missing');
+  }
   registerGetDependenciesTool(server, deps.graphQueries);
   registerAnalyzeImpactTool(server, deps.graphQueries);
   registerGetServiceSummaryTool(server, deps.graphQueries);
