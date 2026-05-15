@@ -48,6 +48,8 @@ export interface HybridResult {
   readonly vectorScore?: number;
   readonly rerankScore?: number;
   readonly neighbours: readonly NeighbourEdge[];
+  /** Phase 2 follow-up: parsed embedding metadata (breadcrumb, lineRange...). */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 interface InternalCandidate {
@@ -57,9 +59,10 @@ interface InternalCandidate {
   readonly repoUrl: string;
   readonly name: string;
   readonly path: string;
-  readonly snippet: string;
+  snippet: string;
   bm25Score?: number;
   vectorScore?: number;
+  metadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface HybridSearchDeps {
@@ -173,9 +176,11 @@ export class HybridSearch {
       const id = idOf(h.row.label, h.row.nodeId);
       const existing = out.get(id);
       const snippet = h.row.textUsed.slice(0, 240);
+      const meta = parseMetadata(h.row.metadata);
       if (existing) {
         existing.vectorScore = h.score;
-        if (!existing.snippet) (existing as InternalCandidate & { snippet: string }).snippet = snippet;
+        if (!existing.snippet) existing.snippet = snippet;
+        if (meta && !existing.metadata) existing.metadata = meta;
       } else {
         out.set(id, {
           id,
@@ -186,6 +191,7 @@ export class HybridSearch {
           path: '',
           snippet,
           vectorScore: h.score,
+          ...(meta ? { metadata: meta } : {}),
         });
       }
     }
@@ -249,8 +255,20 @@ function toResult(c: InternalCandidate, score: number, rerankScore?: number): Hy
     ...(c.bm25Score !== undefined ? { bm25Score: c.bm25Score } : {}),
     ...(c.vectorScore !== undefined ? { vectorScore: c.vectorScore } : {}),
     ...(rerankScore !== undefined ? { rerankScore } : {}),
+    ...(c.metadata ? { metadata: c.metadata } : {}),
     neighbours: [],
   };
+}
+
+function parseMetadata(raw: string | undefined): Readonly<Record<string, unknown>> | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object') return parsed as Readonly<Record<string, unknown>>;
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function buildDoc(c: InternalCandidate): string {

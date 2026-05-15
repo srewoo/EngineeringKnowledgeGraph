@@ -9,6 +9,7 @@
 
 import Database from 'better-sqlite3';
 import { createLogger, type Logger } from '@ekg/shared';
+import { createVssAdapter, readVectorIndexMode, type VssAdapter, type VectorIndexMode } from './embeddings.vss.js';
 
 export interface EmbeddingRow {
   readonly id: string;
@@ -22,7 +23,11 @@ export interface EmbeddingRow {
   readonly vector: Buffer;
   readonly textUsed: string;
   readonly createdAt: string;
+  /** JSON-encoded metadata: breadcrumb, lineRange, headingLevel, etc. */
+  readonly metadata?: string;
 }
+
+const DELETE_CHUNK_SIZE = 500;
 
 export interface SimilarityHit {
   readonly row: EmbeddingRow;
@@ -32,20 +37,24 @@ export interface SimilarityHit {
 export class EmbeddingsRepository {
   private readonly db: Database.Database;
   private readonly logger: Logger;
+  private readonly vectorMode: VectorIndexMode;
+  private vssAdapter?: VssAdapter;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, opts: { readonly vectorMode?: VectorIndexMode } = {}) {
     this.logger = createLogger({ service: 'embeddings-repository' });
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
+    this.vectorMode = opts.vectorMode ?? readVectorIndexMode();
     this.initTables();
   }
 
   /** For tests: share an existing better-sqlite3 connection. */
-  static fromConnection(db: Database.Database): EmbeddingsRepository {
+  static fromConnection(db: Database.Database, opts: { readonly vectorMode?: VectorIndexMode } = {}): EmbeddingsRepository {
     const repo = Object.create(EmbeddingsRepository.prototype) as EmbeddingsRepository;
     Object.assign(repo, {
       db,
       logger: createLogger({ service: 'embeddings-repository' }),
+      vectorMode: opts.vectorMode ?? readVectorIndexMode(),
     });
     db.pragma('journal_mode = WAL');
     (repo as unknown as { initTables: () => void }).initTables();
@@ -72,14 +81,23 @@ export class EmbeddingsRepository {
       CREATE INDEX IF NOT EXISTS idx_embeddings_node ON embeddings(node_id);
       CREATE INDEX IF NOT EXISTS idx_embeddings_hash ON embeddings(content_hash);
     `);
+    // Idempotent ALTER for older DBs that pre-date Phase 2 follow-ups.
+    if (!this.hasColumn('embeddings', 'metadata')) {
+      this.db.exec(`ALTER TABLE embeddings ADD COLUMN metadata TEXT`);
+    }
+  }
+
+  private hasColumn(table: string, column: string): boolean {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    return rows.some((r) => r.name === column);
   }
 
   upsert(rows: readonly EmbeddingRow[]): void {
     if (rows.length === 0) return;
     const stmt = this.db.prepare(`
       INSERT INTO embeddings
-        (id, label, node_id, repo_url, content_hash, provider, model, dimensions, vector, text_used, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, label, node_id, repo_url, content_hash, provider, model, dimensions, vector, text_used, created_at, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (id) DO UPDATE SET
         label = excluded.label,
         node_id = excluded.node_id,
@@ -90,14 +108,25 @@ export class EmbeddingsRepository {
         dimensions = excluded.dimensions,
         vector = excluded.vector,
         text_used = excluded.text_used,
-        created_at = excluded.created_at
+        created_at = excluded.created_at,
+        metadata = excluded.metadata
     `);
+    const ridStmt = this.db.prepare('SELECT rowid AS rid FROM embeddings WHERE id = ?');
+    const mirror = this.vectorMode === 'vss' ? this.ensureVssAdapter() : undefined;
+    if (mirror?.available && rows.length > 0) {
+      mirror.ensureSchema(rows[0]!.dimensions);
+    }
     const tx = this.db.transaction((batch: readonly EmbeddingRow[]) => {
       for (const r of batch) {
         stmt.run(
           r.id, r.label, r.nodeId, r.repoUrl, r.contentHash,
           r.provider, r.model, r.dimensions, r.vector, r.textUsed, r.createdAt,
+          r.metadata ?? null,
         );
+        if (mirror?.available) {
+          const row = ridStmt.get(r.id) as { rid: number } | undefined;
+          if (row) mirror.mirrorUpsert(row.rid, r.vector);
+        }
       }
     });
     tx(rows);
@@ -116,14 +145,31 @@ export class EmbeddingsRepository {
   }
 
   /**
-   * Brute-force cosine similarity. O(N) per query — fine for laptop-scale.
-   * Filters by label and/or repo before scoring to keep N small.
+   * Cosine-similarity search. Dispatches to sqlite-vss ANN when
+   * `EKG_VECTOR_INDEX=vss` AND the native module is available; otherwise
+   * brute-force JS cosine. Both paths cap at k ∈ [1, 100].
    */
   searchSimilar(
     query: Float32Array,
     options: { readonly label?: string; readonly repoUrl?: string; readonly k?: number } = {},
   ): readonly SimilarityHit[] {
     const k = Math.max(1, Math.min(options.k ?? 10, 100));
+    if (this.vectorMode === 'vss') {
+      const adapter = this.ensureVssAdapter();
+      if (adapter.available) {
+        const hits = this.searchSimilarVss(adapter, query, options, k);
+        if (hits) return hits;
+        // adapter returned undefined → fall through to brute path.
+      }
+    }
+    return this.searchSimilarBrute(query, options, k);
+  }
+
+  private searchSimilarBrute(
+    query: Float32Array,
+    options: { readonly label?: string; readonly repoUrl?: string },
+    k: number,
+  ): readonly SimilarityHit[] {
     const filters: string[] = ['dimensions = ?'];
     const params: unknown[] = [query.length];
     if (options.label) { filters.push('label = ?'); params.push(options.label); }
@@ -146,10 +192,83 @@ export class EmbeddingsRepository {
     return scored.slice(0, k);
   }
 
+  private searchSimilarVss(
+    adapter: VssAdapter,
+    query: Float32Array,
+    options: { readonly label?: string; readonly repoUrl?: string },
+    k: number,
+  ): readonly SimilarityHit[] | undefined {
+    adapter.ensureSchema(query.length);
+    // Pull more than k from ANN to leave room for label/repo filtering.
+    const candidateRowids = adapter.search(query, Math.min(k * 4, 400));
+    if (candidateRowids.length === 0) return undefined;
+
+    const placeholders = candidateRowids.map(() => '?').join(',');
+    const filters: string[] = [`rowid IN (${placeholders})`, 'dimensions = ?'];
+    const params: unknown[] = [...candidateRowids, query.length];
+    if (options.label) { filters.push('label = ?'); params.push(options.label); }
+    if (options.repoUrl) { filters.push('repo_url = ?'); params.push(options.repoUrl); }
+    const rows = this.db.prepare(`SELECT * FROM embeddings WHERE ${filters.join(' AND ')}`).all(...params) as Record<string, unknown>[];
+
+    const queryNorm = norm(query);
+    if (queryNorm === 0) return [];
+    const scored: SimilarityHit[] = [];
+    for (const raw of rows) {
+      const row = mapRow(raw);
+      const vec = bufferToFloat32(row.vector);
+      if (vec.length !== query.length) continue;
+      scored.push({ row, score: cosine(query, vec, queryNorm) });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, k);
+  }
+
+  private ensureVssAdapter(): VssAdapter {
+    if (!this.vssAdapter) this.vssAdapter = createVssAdapter(this.db, this.logger);
+    return this.vssAdapter;
+  }
+
   deleteByRepo(repoUrl: string): number {
     const info = this.db.prepare('DELETE FROM embeddings WHERE repo_url = ?').run(repoUrl);
     this.logger.info({ repoUrl, deleted: info.changes }, 'Embeddings deleted for repo');
     return info.changes;
+  }
+
+  /**
+   * Bulk delete by node id, chunked at 500 to stay under SQLite's variable
+   * limit. Returns total rows removed across chunks.
+   */
+  deleteByNodeIds(nodeIds: readonly string[]): number {
+    if (nodeIds.length === 0) return 0;
+    let total = 0;
+    const mirror = this.vectorMode === 'vss' ? this.ensureVssAdapter() : undefined;
+    const tx = this.db.transaction((chunk: readonly string[]) => {
+      const placeholders = chunk.map(() => '?').join(',');
+      let rowids: number[] = [];
+      if (mirror?.available) {
+        rowids = (this.db.prepare(`SELECT rowid AS rid FROM embeddings WHERE node_id IN (${placeholders})`)
+          .all(...chunk) as Array<{ rid: number }>).map((r) => r.rid);
+      }
+      const sql = `DELETE FROM embeddings WHERE node_id IN (${placeholders})`;
+      const info = this.db.prepare(sql).run(...chunk);
+      total += info.changes;
+      if (mirror?.available && rowids.length > 0) mirror.mirrorDelete(rowids);
+    });
+    for (let i = 0; i < nodeIds.length; i += DELETE_CHUNK_SIZE) {
+      tx(nodeIds.slice(i, i + DELETE_CHUNK_SIZE));
+    }
+    if (total > 0) {
+      this.logger.info({ count: nodeIds.length, deleted: total }, 'Embeddings deleted by node ids');
+    }
+    return total;
+  }
+
+  /** All distinct node ids stored for a given repo. */
+  listNodeIdsByRepo(repoUrl: string): string[] {
+    const rows = this.db.prepare(
+      'SELECT DISTINCT node_id AS nodeId FROM embeddings WHERE repo_url = ?',
+    ).all(repoUrl) as Array<{ nodeId: string }>;
+    return rows.map((r) => r.nodeId);
   }
 
   countAll(): number {
@@ -163,6 +282,7 @@ export class EmbeddingsRepository {
 }
 
 function mapRow(row: Record<string, unknown>): EmbeddingRow {
+  const meta = row['metadata'];
   return {
     id: row['id'] as string,
     label: row['label'] as string,
@@ -175,6 +295,7 @@ function mapRow(row: Record<string, unknown>): EmbeddingRow {
     vector: row['vector'] as Buffer,
     textUsed: row['text_used'] as string,
     createdAt: row['created_at'] as string,
+    ...(typeof meta === 'string' && meta.length > 0 ? { metadata: meta } : {}),
   };
 }
 

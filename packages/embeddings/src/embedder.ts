@@ -5,9 +5,10 @@
  */
 
 import { createHash } from 'node:crypto';
-import { createLogger, type Logger } from '@ekg/shared';
+import { createLogger, type Logger, type DocHeading } from '@ekg/shared';
 import type { EmbeddingsRepository, EmbeddingRow } from '@ekg/storage';
 import type { EmbeddingProvider } from './provider.interface.js';
+import { chunkDoc } from './doc.chunker.js';
 
 const MAX_TEXT_BYTES = 8 * 1024;
 const DOC_CHUNK_CHARS = 2000;
@@ -30,6 +31,8 @@ export interface DocEmbeddable {
   readonly nodeId: string;
   readonly title: string;
   readonly text: string;
+  /** Phase 2 follow-up: when present, the embedder uses heading-aware chunking. */
+  readonly headings?: readonly DocHeading[];
 }
 
 export interface TableEmbeddable {
@@ -60,6 +63,7 @@ interface PreparedItem {
   readonly nodeId: string;
   readonly text: string;        // already truncated to MAX_TEXT_BYTES
   readonly contentHash: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 export class Embedder {
@@ -118,6 +122,7 @@ export class Embedder {
           vector: toFloat32Buffer(vec),
           textUsed: item.text,
           createdAt: new Date().toISOString(),
+          ...(item.metadata ? { metadata: JSON.stringify(item.metadata) } : {}),
         });
       }
     }
@@ -159,7 +164,28 @@ export class Embedder {
   }
 
   private prepareDoc(node: DocEmbeddable): readonly PreparedItem[] {
-    const fullText = `${node.title}\n\n${node.text}`;
+    if (node.headings && node.headings.length > 0) {
+      const chunks = chunkDoc({ title: node.title, headings: node.headings, rawText: node.text });
+      return chunks.map((c, idx) => {
+        const text = truncate(c.text);
+        return {
+          id: `Doc:${node.nodeId}#chunk:${idx}`,
+          label: 'Doc' as const,
+          nodeId: node.nodeId,
+          text,
+          contentHash: sha256(text),
+          metadata: {
+            title: node.title,
+            breadcrumb: c.breadcrumb,
+            headingLevel: c.headingLevel,
+            lineRange: c.lineRange,
+          },
+        };
+      });
+    }
+    // Fallback: legacy char-based chunker, breadcrumb-prefixed for consistency.
+    const breadcrumb = `[${node.title.trim()}]`;
+    const fullText = `${breadcrumb}\n${node.text}`;
     const chunks = chunkText(fullText, DOC_CHUNK_CHARS, DOC_CHUNK_OVERLAP_RATIO);
     return chunks.map((chunk, idx) => {
       const text = truncate(chunk);
@@ -169,6 +195,7 @@ export class Embedder {
         nodeId: node.nodeId,
         text,
         contentHash: sha256(text),
+        metadata: { title: node.title, breadcrumb, headingLevel: 0 },
       };
     });
   }

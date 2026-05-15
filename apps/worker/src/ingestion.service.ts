@@ -273,6 +273,18 @@ export class IngestionService {
       this.sqliteRepo.deleteFileMetadata(f, options.repoUrl);
     }
 
+    // Phase 2 follow-up: align embeddings + BM25 cleanup with the graph delete.
+    // We don't know exactly which node ids the graph dropped, so we use the
+    // node-id-contains-path heuristic over the SQLite index sets. Safe (won't
+    // touch unaffected nodes) and bounded.
+    const staleIds = this.collectStaleSidecarNodeIds(options.repoUrl, changedFiles);
+    const deletedEmbeddings = this.embeddingsService?.getRepository()?.deleteByNodeIds(staleIds) ?? 0;
+    const deletedSearchRows = this.searchIndexService?.getRepository()?.deleteByNodeIds(staleIds) ?? 0;
+    this.logger.info(
+      { jobId, repoUrl: options.repoUrl, changedFiles: changedFiles.length, deletedEmbeddings, deletedSearchRows },
+      'Sidecar (embeddings + BM25) cleanup',
+    );
+
     // Re-parse changed files in bounded-parallel batches
     this.sqliteRepo.updateJobStatus(jobId, 'PARSING');
     const allNodes = [];
@@ -485,6 +497,33 @@ export class IngestionService {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Find node ids in the sidecar (embeddings + BM25) tables that reference
+   * any of the changed files. Phase 2 follow-up — keeps SQLite caches aligned
+   * with the Neo4j incremental delete pass. Heuristic: a sidecar row is
+   * considered stale if its node_id contains one of the changed file paths
+   * (matching the id-construction pattern used across extractors).
+   */
+  private collectStaleSidecarNodeIds(repoUrl: string, changedFiles: readonly string[]): readonly string[] {
+    if (changedFiles.length === 0) return [];
+    const ids = new Set<string>();
+    const embRepo = this.embeddingsService?.getRepository();
+    const bm25Repo = this.searchIndexService?.getRepository();
+    const candidate = new Set<string>();
+    if (embRepo) {
+      for (const id of embRepo.listNodeIdsByRepo(repoUrl)) candidate.add(id);
+    }
+    if (bm25Repo) {
+      for (const id of bm25Repo.listNodeIdsByRepo(repoUrl)) candidate.add(id);
+    }
+    for (const id of candidate) {
+      for (const file of changedFiles) {
+        if (id.includes(file)) { ids.add(id); break; }
+      }
+    }
+    return [...ids];
   }
 
   private detectLanguage(filePath: string): string {

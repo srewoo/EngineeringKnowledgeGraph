@@ -36,6 +36,7 @@ export interface Bm25Options {
 
 const DEFAULT_K = 50;
 const MAX_K = 200;
+const DELETE_CHUNK_SIZE = 500;
 
 export class SearchTextRepository {
   private readonly db: Database.Database;
@@ -142,6 +143,33 @@ export class SearchTextRepository {
     const info = this.db.prepare('DELETE FROM search_text WHERE repo_url = ?').run(repoUrl);
     this.logger.info({ repoUrl, deleted: info.changes }, 'BM25 rows deleted for repo');
     return info.changes;
+  }
+
+  /** Bulk delete by node id, chunked at 500 to keep parameter counts safe. */
+  deleteByNodeIds(nodeIds: readonly string[]): number {
+    if (nodeIds.length === 0) return 0;
+    let total = 0;
+    const tx = this.db.transaction((chunk: readonly string[]) => {
+      const placeholders = chunk.map(() => '?').join(',');
+      const sql = `DELETE FROM search_text WHERE node_id IN (${placeholders})`;
+      const info = this.db.prepare(sql).run(...chunk);
+      total += info.changes;
+    });
+    for (let i = 0; i < nodeIds.length; i += DELETE_CHUNK_SIZE) {
+      tx(nodeIds.slice(i, i + DELETE_CHUNK_SIZE));
+    }
+    if (total > 0) {
+      this.logger.info({ count: nodeIds.length, deleted: total }, 'BM25 rows deleted by node ids');
+    }
+    return total;
+  }
+
+  /** All distinct node ids indexed for a given repo. */
+  listNodeIdsByRepo(repoUrl: string): string[] {
+    const rows = this.db.prepare(
+      'SELECT DISTINCT node_id AS nodeId FROM search_text WHERE repo_url = ?',
+    ).all(repoUrl) as Array<{ nodeId: string }>;
+    return rows.map((r) => r.nodeId);
   }
 
   countAll(): number {

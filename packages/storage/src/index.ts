@@ -1,6 +1,8 @@
 export { SqliteRepository } from './sqlite.repository.js';
 export { EmbeddingsRepository } from './embeddings.repository.js';
 export type { EmbeddingRow, SimilarityHit } from './embeddings.repository.js';
+export { readVectorIndexMode, createVssAdapter } from './embeddings.vss.js';
+export type { VectorIndexMode, VssAdapter } from './embeddings.vss.js';
 export { SearchTextRepository, sanitiseFtsQuery } from './search-text.repository.js';
 export type { SearchTextRow, Bm25Hit, Bm25Options } from './search-text.repository.js';
 export { RepoStateRepository } from './repo-state.repository.js';

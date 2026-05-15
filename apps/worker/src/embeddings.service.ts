@@ -158,12 +158,17 @@ export class EmbeddingsService {
   }
 
   private docInput(node: GraphNode): DocEmbeddable {
-    const props = node.properties as { title?: string; rawText?: string };
+    const props = node.properties as {
+      title?: string;
+      rawText?: string;
+      headings?: readonly { level: number; text: string }[];
+    };
     return {
       kind: 'Doc',
       nodeId: node.id,
       title: props.title ?? node.name,
       text: props.rawText ?? '',
+      ...(props.headings && props.headings.length > 0 ? { headings: props.headings } : {}),
     };
   }
 

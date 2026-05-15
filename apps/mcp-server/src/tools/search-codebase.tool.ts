@@ -118,6 +118,7 @@ function serialiseResult(r: HybridResult) {
     path: r.path,
     repoUrl: r.repoUrl,
     snippet: r.snippet,
+    metadata: r.metadata,
     bm25Score: r.bm25Score !== undefined ? Number(r.bm25Score.toFixed(4)) : undefined,
     vectorScore: r.vectorScore !== undefined ? Number(r.vectorScore.toFixed(4)) : undefined,
     rerankScore: r.rerankScore !== undefined ? Number(r.rerankScore.toFixed(4)) : undefined,
