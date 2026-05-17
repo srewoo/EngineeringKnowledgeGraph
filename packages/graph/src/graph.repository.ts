@@ -29,6 +29,43 @@ export const MAX_UNWIND_CHUNK_SIZE = 5_000;
  * list when input is empty so callers can `for…of` without a guard.
  * Throws on size <= 0 — silent fallback would mean one giant chunk.
  */
+/**
+ * Sanitize a properties bag for Neo4j storage. Neo4j only accepts primitives
+ * or arrays of primitives; nested objects and mixed-type arrays are rejected
+ * at write time with a "Property values can only be of primitive types..."
+ * error. We JSON-encode any offending value and prefix the key with `_json_`
+ * so readers know to decode (and so the original primitive key is never
+ * shadowed). null/undefined values are dropped.
+ */
+export function sanitizeProperties(
+  props: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!props) return out;
+  for (const [key, value] of Object.entries(props)) {
+    if (value === null || value === undefined) continue;
+    if (isNeo4jPrimitive(value)) {
+      out[key] = value;
+      continue;
+    }
+    if (Array.isArray(value) && value.every(isNeo4jPrimitive)) {
+      out[key] = value;
+      continue;
+    }
+    try {
+      out[`_json_${key}`] = JSON.stringify(value);
+    } catch {
+      // unstringifiable (cycles etc.) — drop silently rather than fail the write
+    }
+  }
+  return out;
+}
+
+function isNeo4jPrimitive(v: unknown): boolean {
+  const t = typeof v;
+  return t === 'string' || t === 'number' || t === 'boolean' || t === 'bigint';
+}
+
 export function chunkRows<T>(rows: readonly T[], size: number): T[][] {
   if (size <= 0) throw new Error(`chunkRows: size must be > 0, got ${size}`);
   if (rows.length === 0) return [];
@@ -84,7 +121,7 @@ export class GraphRepository {
         const rows = batch.map((n) => ({
           id: n.id,
           name: n.name,
-          properties: n.properties,
+          properties: sanitizeProperties(n.properties as Record<string, unknown>),
         }));
 
         const startedAt = Date.now();
@@ -141,7 +178,7 @@ export class GraphRepository {
           sourceId: r.sourceId,
           targetId: r.targetId,
           confidence: r.confidence,
-          properties: r.properties,
+          properties: sanitizeProperties(r.properties as Record<string, unknown>),
         }));
 
         const startedAt = Date.now();

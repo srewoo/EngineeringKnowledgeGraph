@@ -38,7 +38,7 @@ export const envConfigSchema = z.object({
   gitlabUrl: z.string().default('https://gitlab.com'),
   gitlabGroupIds: z.string().optional(),
   maxRepoSizeMb: z.coerce.number().positive().default(1024),
-  bulkConcurrency: z.coerce.number().int().positive().max(32).default(5),
+  bulkConcurrency: z.coerce.number().int().positive().max(32).default(2),
   ingestTimeoutMs: z.coerce.number().int().positive().min(60_000).default(600_000),
 });
 
@@ -107,7 +107,8 @@ export const docNodeSchema = z.object({
   repoUrl: z.string().min(1),
   kind: docKindSchema,
   title: z.string(),
-  headings: z.array(docHeadingSchema),
+  headingLevels: z.array(z.number().int().nonnegative()),
+  headingTexts: z.array(z.string()),
   rawText: z.string(),
   codeBlockCount: z.number().int().nonnegative(),
   linkCount: z.number().int().nonnegative(),

@@ -72,18 +72,32 @@ export class RepoCloner {
     this.logger.info({ url: url.replace(/\/\/.*@/, '//***@'), branch }, 'Cloning repository');
 
     const git = signal ? simpleGit({ abort: signal }) : simpleGit();
-    // Use raw() so `-c pack.threads=N` lands before `clone` (per-invocation config).
-    await git.raw([
+    const baseArgs = [
       '-c', `pack.threads=${PACK_THREADS}`,
       'clone',
-      '--branch', branch,
       '--single-branch',
       '--depth', '1',                    // Only latest commit
       '--no-tags',                        // Skip tag refs (Mindtickle repos have many)
       '--filter=blob:limit=2m',           // Skip blobs >2MB (images, binaries, lockfiles)
-      url,
-      localPath,
-    ]);
+    ];
+    try {
+      // Use raw() so `-c pack.threads=N` lands before `clone` (per-invocation config).
+      await git.raw([...baseArgs, '--branch', branch, url, localPath]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const branchMissing =
+        /remote ref/i.test(msg) ||
+        /pathspec '.*' did not match/i.test(msg) ||
+        /Remote branch .* not found/i.test(msg);
+      if (!branchMissing) throw err;
+      // Fall back to the remote's default HEAD — covers repos whose default
+      // branch isn't `main` (e.g. `master`, `develop`).
+      this.logger.warn(
+        { branch, url: url.replace(/\/\/.*@/, '//***@') },
+        'Requested branch missing — retrying clone with remote default HEAD',
+      );
+      await git.raw([...baseArgs, url, localPath]);
+    }
 
     // Post-clone: remove bloat directories that shouldn't be in git but sometimes are
     await this.cleanupBloat(localPath);

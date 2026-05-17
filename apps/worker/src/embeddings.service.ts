@@ -8,7 +8,13 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createLogger, type Logger, type GraphNode, type GraphRelationship } from '@ekg/shared';
+import {
+  createLogger,
+  readDocHeadings,
+  type Logger,
+  type GraphNode,
+  type GraphRelationship,
+} from '@ekg/shared';
 import {
   Embedder,
   getEmbeddingProvider,
@@ -161,14 +167,16 @@ export class EmbeddingsService {
     const props = node.properties as {
       title?: string;
       rawText?: string;
-      headings?: readonly { level: number; text: string }[];
+      headingLevels?: readonly number[];
+      headingTexts?: readonly string[];
     };
+    const headings = readDocHeadings(props);
     return {
       kind: 'Doc',
       nodeId: node.id,
       title: props.title ?? node.name,
       text: props.rawText ?? '',
-      ...(props.headings && props.headings.length > 0 ? { headings: props.headings } : {}),
+      ...(headings.length > 0 ? { headings } : {}),
     };
   }
 

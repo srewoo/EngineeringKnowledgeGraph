@@ -66,12 +66,14 @@ describe('MarkdownExtractor', () => {
       const r = extractor.extract(md, 'README.md', REPO);
       const props = r.doc.properties;
       expect(props.title).toBe('Service X');
-      expect(props.headings).toEqual([
+      expect(r.headings).toEqual([
         { level: 1, text: 'Service X' },
         { level: 2, text: 'Overview' },
         { level: 3, text: 'Details' },
         { level: 2, text: 'Setup' },
       ]);
+      expect(props.headingLevels).toEqual([1, 2, 3, 2]);
+      expect(props.headingTexts).toEqual(['Service X', 'Overview', 'Details', 'Setup']);
       expect(r.doc.id).toBe(`${REPO}:README.md`);
       expect(props.kind).toBe('README');
       expect(props.format).toBe('markdown');
@@ -80,7 +82,7 @@ describe('MarkdownExtractor', () => {
     it('extracts setext-style headings', () => {
       const md = ['Title Here', '==========', '', 'Sub', '---'].join('\n');
       const r = extractor.extract(md, 'docs/x.md', REPO);
-      expect(r.doc.properties.headings).toEqual([
+      expect(r.headings).toEqual([
         { level: 1, text: 'Title Here' },
         { level: 2, text: 'Sub' },
       ]);
@@ -89,7 +91,7 @@ describe('MarkdownExtractor', () => {
     it('ignores headings inside fenced code blocks', () => {
       const md = ['# Real', '', '```', '# Fake heading', '```', '', '## Also Real'].join('\n');
       const r = extractor.extract(md, 'README.md', REPO);
-      expect(r.doc.properties.headings.map((h) => h.text)).toEqual(['Real', 'Also Real']);
+      expect(r.headings.map((h) => h.text)).toEqual(['Real', 'Also Real']);
     });
 
     it('extracts fenced code blocks with and without language', () => {
@@ -165,7 +167,7 @@ describe('MarkdownExtractor', () => {
       const r = extractor.extract(adoc, 'docs/x.adoc', REPO);
       expect(r.doc.properties.title).toBe('Top');
       expect(r.doc.properties.format).toBe('adoc');
-      expect(r.doc.properties.headings).toEqual([
+      expect(r.headings).toEqual([
         { level: 1, text: 'Top' },
         { level: 2, text: 'Sub' },
       ]);
@@ -204,7 +206,7 @@ describe('MarkdownExtractor', () => {
       const r = extractor.extract(md, 'README.md', REPO);
       expect(r.doc.properties.kind).toBe('README');
       expect(r.doc.properties.title).toBe('CodeSage');
-      expect(r.doc.properties.headings.length).toBe(4);
+      expect(r.headings.length).toBe(4);
       expect(r.codeBlocks.length).toBe(2);
       expect(r.codeBlocks.map((b) => b.language).sort()).toEqual(['bash', 'ts']);
       expect(r.links.map((l) => l.url)).toEqual(

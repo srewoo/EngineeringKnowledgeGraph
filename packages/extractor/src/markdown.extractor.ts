@@ -13,6 +13,7 @@
 import { basename, extname } from 'node:path';
 import {
   MAX_DOC_TEXT_BYTES,
+  encodeDocHeadings,
   type CodeBlock,
   type DocHeading,
   type DocKind,
@@ -22,6 +23,7 @@ import {
 
 export interface MarkdownExtractionResult {
   readonly doc: DocNode;
+  readonly headings: readonly DocHeading[];
   readonly codeBlocks: readonly CodeBlock[];
   readonly links: readonly DocLink[];
 }
@@ -67,6 +69,7 @@ export class MarkdownExtractor {
     const rawText = truncate(content, MAX_DOC_TEXT_BYTES);
 
     const id = `${repoUrl}:${relativePath}`;
+    const { headingLevels, headingTexts } = encodeDocHeadings(headings);
     const doc: DocNode = {
       id,
       label: 'Doc',
@@ -76,7 +79,8 @@ export class MarkdownExtractor {
         repoUrl,
         kind,
         title,
-        headings,
+        headingLevels,
+        headingTexts,
         rawText,
         codeBlockCount: codeBlocks.length,
         linkCount: links.length,
@@ -84,7 +88,7 @@ export class MarkdownExtractor {
       },
     };
 
-    return { doc, codeBlocks, links };
+    return { doc, headings, codeBlocks, links };
   }
 
   private formatFor(ext: string): DocFormat {

@@ -24,11 +24,20 @@ export function registerBulkIngestTool(
 ): void {
   server.tool(
     'bulk_ingest',
-    `Start bulk ingestion of all repos from GitLab groups (runs in background). Returns a job ID immediately — use get_ingestion_status to poll progress. Repos > ${config.maxRepoSizeMb}MB are auto-skipped. Concurrency: ${config.concurrency}.`,
+    `Start bulk ingestion of all repos from GitLab groups (runs in background). Returns a job ID immediately — use get_ingestion_status to poll progress. Repos > ${config.maxRepoSizeMb}MB are auto-skipped. Default concurrency: ${config.concurrency} (override via 'concurrency' param, 1–32).`,
     {
       groupIds: z.string().describe('Comma-separated GitLab group IDs to ingest (e.g. "123,456")'),
+      concurrency: z
+        .number()
+        .int()
+        .min(1)
+        .max(32)
+        .optional()
+        .describe(
+          `Parallel repo workers (1–32). Lower values reduce Neo4j lock contention on large bulk runs. Default: ${config.concurrency}.`,
+        ),
     },
-    async ({ groupIds }) => {
+    async ({ groupIds, concurrency }) => {
       try {
         if (!config.token) {
           return {
@@ -41,6 +50,7 @@ export function registerBulkIngestTool(
         }
 
         const parsedGroupIds = groupIds.split(',').map((id) => parseInt(id.trim(), 10));
+        const effectiveConcurrency = concurrency ?? config.concurrency;
 
         // Start in background — returns immediately
         const bulkJobId = bulkService.startBulkIngest(
@@ -48,7 +58,7 @@ export function registerBulkIngestTool(
           config.token,
           parsedGroupIds,
           config.maxRepoSizeMb,
-          config.concurrency,
+          effectiveConcurrency,
         );
 
         return {
@@ -61,7 +71,7 @@ export function registerBulkIngestTool(
               config: {
                 groupIds: parsedGroupIds,
                 maxRepoSizeMb: config.maxRepoSizeMb,
-                concurrency: config.concurrency,
+                concurrency: effectiveConcurrency,
               },
             }, null, 2),
           }],

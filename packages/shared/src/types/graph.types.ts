@@ -165,6 +165,29 @@ export interface DocHeading {
   readonly text: string;
 }
 
+/** Encode headings as parallel primitive arrays for Neo4j storage. */
+export function encodeDocHeadings(
+  headings: readonly DocHeading[],
+): { headingLevels: number[]; headingTexts: string[] } {
+  return {
+    headingLevels: headings.map((h) => h.level),
+    headingTexts: headings.map((h) => h.text),
+  };
+}
+
+/** Reconstruct headings from parallel primitive arrays. */
+export function readDocHeadings(props: {
+  headingLevels?: readonly number[];
+  headingTexts?: readonly string[];
+}): readonly DocHeading[] {
+  const levels = props.headingLevels ?? [];
+  const texts = props.headingTexts ?? [];
+  const n = Math.min(levels.length, texts.length);
+  const out: DocHeading[] = [];
+  for (let i = 0; i < n; i++) out.push({ level: levels[i]!, text: texts[i]! });
+  return out;
+}
+
 export interface CodeBlock {
   readonly language: string;
   readonly code: string;
@@ -183,7 +206,10 @@ export interface DocNode extends GraphNode {
     repoUrl: string;
     kind: DocKind;
     title: string;
-    headings: readonly DocHeading[];
+    // Stored as parallel primitive arrays — Neo4j rejects nested objects on
+    // node properties. Use `readDocHeadings()` from @ekg/shared to reconstruct.
+    headingLevels: readonly number[];
+    headingTexts: readonly string[];
     rawText: string;
     codeBlockCount: number;
     linkCount: number;
