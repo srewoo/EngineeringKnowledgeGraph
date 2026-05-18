@@ -157,6 +157,7 @@ async function main(): Promise<void> {
       maxRepoSizeMb: env.maxRepoSizeMb,
       concurrency: env.bulkConcurrency,
     },
+    dataDir: env.dataDir,
   });
 
   logger.info('Connecting stdio transport');

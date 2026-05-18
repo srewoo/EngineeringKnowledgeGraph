@@ -76,7 +76,10 @@ export class MarkdownExtractor {
         repoUrl,
         kind,
         title,
-        headings,
+        // Neo4j only accepts primitives and primitive arrays as node
+        // properties. Serialise the structured heading objects to a flat
+        // string array (`"<level>: <text>"`) so the property load is valid.
+        headings: headings.map((h) => `${h.level}: ${h.text}`),
         rawText,
         codeBlockCount: codeBlocks.length,
         linkCount: links.length,

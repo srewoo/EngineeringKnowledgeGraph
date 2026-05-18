@@ -177,7 +177,8 @@ export interface DocNode extends GraphNode {
     repoUrl: string;
     kind: DocKind;
     title: string;
-    headings: readonly DocHeading[];
+    /** Flattened "<level>: <text>" — Neo4j rejects nested-object properties. */
+    headings: readonly string[];
     rawText: string;
     codeBlockCount: number;
     linkCount: number;

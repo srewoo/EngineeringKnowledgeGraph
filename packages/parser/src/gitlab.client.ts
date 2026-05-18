@@ -258,6 +258,27 @@ export class GitLabClient {
     return repos;
   }
 
+  /**
+   * Authenticated GET against the GitLab v4 REST API. Returns the parsed
+   * JSON body or throws on non-2xx. Exposed for tools that need to read
+   * MR / pipeline / discussion data without rebuilding the rate-limit and
+   * retry plumbing.
+   */
+  async apiGet<T = unknown>(
+    gitlabUrl: string,
+    token: string,
+    apiPath: string,
+  ): Promise<T> {
+    const url = `${gitlabUrl}/api/v4${apiPath}`;
+    const res = await this.rateLimitedFetch(url, {
+      headers: { 'PRIVATE-TOKEN': token, Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      throw new Error(`GitLab GET ${apiPath} failed: ${res.status} ${res.statusText}`);
+    }
+    return (await res.json()) as T;
+  }
+
   private deduplicateById(repos: GitLabRepo[]): GitLabRepo[] {
     const seen = new Map<number, GitLabRepo>();
     for (const repo of repos) {

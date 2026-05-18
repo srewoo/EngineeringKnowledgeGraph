@@ -51,6 +51,9 @@ import { registerAdapterQueryTool } from './tools/adapter-query.tool.js';
 import { registerListDlqTool } from './tools/list-dlq.tool.js';
 import { registerListUnresolvedHttpCallsTool } from './tools/list-unresolved-http-calls.tool.js';
 import { registerRetryDlqTool } from './tools/retry-dlq.tool.js';
+import { registerCodeGrepTool } from './tools/code-grep.tool.js';
+import { registerGitlabGetMrTool } from './tools/gitlab-get-mr.tool.js';
+import { registerCompareDependenciesTool } from './tools/compare-dependencies.tool.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -77,6 +80,7 @@ export interface ServerDependencies {
     readonly maxRepoSizeMb: number;
     readonly concurrency: number;
   };
+  readonly dataDir: string;
 }
 
 export function createMcpServer(deps: ServerDependencies): McpServer {
@@ -170,6 +174,17 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Phase 1.5 — surface unresolved cross-service HTTP calls.
   const unresolvedHttpRepo = new UnresolvedHttpRepository(deps.sqliteRepo.getConnection());
   registerListUnresolvedHttpCallsTool(server, unresolvedHttpRepo);
+
+  // New: code search, GitLab MR review, declared-vs-runtime dep diff.
+  registerCodeGrepTool(server, { dataDir: deps.dataDir });
+  registerGitlabGetMrTool(server, {
+    gitlabUrl: deps.gitlabConfig.gitlabUrl,
+    token: deps.gitlabConfig.token,
+  });
+  registerCompareDependenciesTool(server, {
+    neo4jClient: deps.neo4jClient,
+    ...(deps.runtimeRegistry ? { runtimeRegistry: deps.runtimeRegistry } : {}),
+  });
 
   // Register resources (4 total)
   registerGraphStatsResource(server, deps.neo4jClient, deps.sqliteRepo);

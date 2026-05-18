@@ -1,0 +1,15 @@
+- What is the s3 path where loki logs are stored for prod environment? 
+- which flows write to the CallAI kafka topic dialer-integration.self.webhook . Is it only applicable to a set of dialers? Are there relevant logs to check if we received the webhooks but failed to write on the topic?
+- In callAI, both meetings and persons are marked as internal and external. How does that work? What if I just change some historical persons from internal to external, what would be the behaviour of the system?
+- What is the url endpoint of Call AI public API for integration and staging enviornment, as we have this https://api-gateway.callai.mindtickle.com/public/graphapi for production
+- what is the retry count on step function for recall reconciliation? How does this work?
+- Why do we have 1000 meetings limit in contexual filter for SFDC, is there any product requirement doc?
+- how does language detection on calls work in callAI?
+- what does is_trim mean in snippets_v2_* table and why meeting_id is null in this case
+- can you find in which flow we add alternate domain to the cloud front distribution - d150ncw7uxje7r.cloudfront.net
+- Do we mark a person for a tenant internal / external other than just marking the meetings
+- What happens today for a call that lasts say 8 hrs? Do we record the first 5.5 hrs and generate the first 5.5 hr transcript or we don’t save recordings and don’t generate call transcript for calls > 5.5 hrs
+- Is there any flow in CallAI that supports recording hard deletion including deletion of media and transcript file
+- How to deactivate CallAI recordings external sharing?
+- Who calls /update_url_query_params_bulk endpoint of CallAI url-generator
+- Can you find out in Call AI services and repos, where do we add the "search=" query param explicitly, we know one instance where this is used i.e. url-generator service, but we want to know that how many other places this is added. And also can you find out how email tracking works, means how the email tracking url gets the utm_* query parameters and who are those consumer and how it will sends to the mixpanel.

@@ -203,7 +203,8 @@ export class EmbeddingsService {
   private apiInput(node: GraphNode): ApiEmbeddable {
     const props = node.properties as {
       method?: string; path?: string; summary?: string; operationId?: string;
-      requestSchema?: unknown; responseSchemas?: Record<string, unknown>;
+      // Schemas are JSON-stringified on the graph; parseSchema() round-trips them.
+      requestSchema?: unknown; responseSchemas?: unknown;
     };
     return {
       kind: 'API',
@@ -212,8 +213,8 @@ export class EmbeddingsService {
       path: props.path ?? node.name,
       ...(props.summary ? { summary: props.summary } : {}),
       ...(props.operationId ? { operationId: props.operationId } : {}),
-      requestSchemaKeys: flattenKeys(props.requestSchema),
-      responseSchemaKeys: Object.values(props.responseSchemas ?? {}).flatMap((s) => flattenKeys(s)),
+      requestSchemaKeys: flattenKeys(parseSchema(props.requestSchema)),
+      responseSchemaKeys: Object.values(parseSchema(props.responseSchemas) ?? {}).flatMap((s) => flattenKeys(s)),
     };
   }
 }
@@ -224,6 +225,18 @@ async function readBodyLines(absolutePath: string, lineStart: number, lineEnd: n
   const start = Math.max(0, lineStart - 1);
   const end = Math.min(lines.length, lineEnd);
   return lines.slice(start, end).join('\n');
+}
+
+/**
+ * Schema fields are now stored on the graph as JSON strings (see
+ * openapi.extractor — Neo4j rejects nested-object properties). Parse the
+ * string back to an object for keyword extraction; pass-through values
+ * that are already objects stay as-is.
+ */
+function parseSchema(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  if (value.length === 0) return undefined;
+  try { return JSON.parse(value); } catch { return undefined; }
 }
 
 function flattenKeys(schema: unknown, prefix = '', depth = 0): string[] {

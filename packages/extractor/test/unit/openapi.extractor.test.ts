@@ -150,8 +150,9 @@ describe('OpenApiExtractor', () => {
       const createPet = findApi(apis, 'POST', '/pets');
       expect(createPet).toBeDefined();
       const props = createPet!.properties as Record<string, unknown>;
-      expect(props['requestSchema']).toEqual({ $ref: '#/components/schemas/Pet' });
-      const responses = props['responseSchemas'] as Record<string, unknown>;
+      // Schemas are JSON-stringified for Neo4j compatibility.
+      expect(JSON.parse(props['requestSchema'] as string)).toEqual({ $ref: '#/components/schemas/Pet' });
+      const responses = JSON.parse(props['responseSchemas'] as string) as Record<string, unknown>;
       expect(responses['201']).toEqual({ $ref: '#/components/schemas/Pet' });
       // 400 has no content, so no entry.
       expect(responses['400']).toBeUndefined();
@@ -160,7 +161,7 @@ describe('OpenApiExtractor', () => {
     it('captures $ref strings verbatim (no resolution)', () => {
       const { apis } = extractor.extract(OPENAPI_3_YAML, 'docs/openapi.yaml', REPO);
       const listPets = findApi(apis, 'GET', '/pets');
-      const responses = (listPets!.properties as Record<string, unknown>)['responseSchemas'] as Record<string, unknown>;
+      const responses = JSON.parse((listPets!.properties as Record<string, unknown>)['responseSchemas'] as string) as Record<string, unknown>;
       expect(responses['200']).toEqual({ $ref: '#/components/schemas/PetList' });
     });
 
@@ -189,8 +190,8 @@ describe('OpenApiExtractor', () => {
       const { apis } = extractor.extract(SWAGGER_2_JSON, 'swagger.json', REPO);
       const createUser = findApi(apis, 'POST', '/users');
       const props = createUser!.properties as Record<string, unknown>;
-      expect(props['requestSchema']).toEqual({ $ref: '#/definitions/User' });
-      const responses = props['responseSchemas'] as Record<string, unknown>;
+      expect(JSON.parse(props['requestSchema'] as string)).toEqual({ $ref: '#/definitions/User' });
+      const responses = JSON.parse(props['responseSchemas'] as string) as Record<string, unknown>;
       expect(responses['201']).toEqual({ $ref: '#/definitions/User' });
       expect(props['specVersion']).toBe('swagger-2');
     });

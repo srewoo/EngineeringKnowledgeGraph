@@ -67,10 +67,10 @@ describe('MarkdownExtractor', () => {
       const props = r.doc.properties;
       expect(props.title).toBe('Service X');
       expect(props.headings).toEqual([
-        { level: 1, text: 'Service X' },
-        { level: 2, text: 'Overview' },
-        { level: 3, text: 'Details' },
-        { level: 2, text: 'Setup' },
+        '1: Service X',
+        '2: Overview',
+        '3: Details',
+        '2: Setup',
       ]);
       expect(r.doc.id).toBe(`${REPO}:README.md`);
       expect(props.kind).toBe('README');
@@ -80,16 +80,13 @@ describe('MarkdownExtractor', () => {
     it('extracts setext-style headings', () => {
       const md = ['Title Here', '==========', '', 'Sub', '---'].join('\n');
       const r = extractor.extract(md, 'docs/x.md', REPO);
-      expect(r.doc.properties.headings).toEqual([
-        { level: 1, text: 'Title Here' },
-        { level: 2, text: 'Sub' },
-      ]);
+      expect(r.doc.properties.headings).toEqual(['1: Title Here', '2: Sub']);
     });
 
     it('ignores headings inside fenced code blocks', () => {
       const md = ['# Real', '', '```', '# Fake heading', '```', '', '## Also Real'].join('\n');
       const r = extractor.extract(md, 'README.md', REPO);
-      expect(r.doc.properties.headings.map((h) => h.text)).toEqual(['Real', 'Also Real']);
+      expect(r.doc.properties.headings.map((h) => h.split(': ').slice(1).join(': '))).toEqual(['Real', 'Also Real']);
     });
 
     it('extracts fenced code blocks with and without language', () => {
@@ -165,10 +162,7 @@ describe('MarkdownExtractor', () => {
       const r = extractor.extract(adoc, 'docs/x.adoc', REPO);
       expect(r.doc.properties.title).toBe('Top');
       expect(r.doc.properties.format).toBe('adoc');
-      expect(r.doc.properties.headings).toEqual([
-        { level: 1, text: 'Top' },
-        { level: 2, text: 'Sub' },
-      ]);
+      expect(r.doc.properties.headings).toEqual(['1: Top', '2: Sub']);
     });
   });
 

@@ -166,9 +166,14 @@ function buildApiNode(
   if (summary) props['summary'] = summary;
   if (description) props['description'] = description;
   if (tags && tags.length > 0) props['tags'] = tags;
-  if (requestSchema !== undefined) props['requestSchema'] = requestSchema;
+  // Neo4j only accepts primitives or primitive arrays as node properties.
+  // Serialise the JSON Schema payloads to JSON strings so we can still
+  // round-trip them later when the agent needs the raw schema.
+  if (requestSchema !== undefined) {
+    props['requestSchema'] = safeStringify(requestSchema);
+  }
   if (responseSchemas && Object.keys(responseSchemas).length > 0) {
-    props['responseSchemas'] = responseSchemas;
+    props['responseSchemas'] = safeStringify(responseSchemas);
   }
 
   return {
@@ -260,4 +265,27 @@ function safeParseRoot(content: string): RawSpecRoot | undefined {
 
 function isObject(v: unknown): v is Readonly<Record<string, unknown>> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * JSON.stringify with a hard size cap and circular-reference fallback.
+ * Returns "" if serialisation fails so callers can store a string property
+ * unconditionally.
+ */
+const MAX_SCHEMA_BYTES = 64 * 1024;
+function safeStringify(value: unknown): string {
+  try {
+    const seen = new WeakSet();
+    const out = JSON.stringify(value, (_key, val) => {
+      if (val && typeof val === 'object') {
+        if (seen.has(val as object)) return '[Circular]';
+        seen.add(val as object);
+      }
+      return val;
+    });
+    if (!out) return '';
+    return out.length > MAX_SCHEMA_BYTES ? `${out.slice(0, MAX_SCHEMA_BYTES)}...[truncated]` : out;
+  } catch {
+    return '';
+  }
 }
