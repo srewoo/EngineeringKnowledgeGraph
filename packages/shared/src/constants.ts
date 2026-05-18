@@ -116,6 +116,8 @@ export const DEFAULT_SUPPORTED_EXTENSIONS: readonly string[] = [
   '.sh', '.bash', '.zsh', '.ps1',
   // Schema / IDL
   '.graphql', '.gql', '.proto', '.thrift', '.prisma',
+  // DDL
+  '.sql', '.ddl',
   // Config / data
   '.json', '.yaml', '.yml', '.toml', '.ini', '.env',
   // Infra

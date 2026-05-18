@@ -34,7 +34,8 @@
     { "path": "packages/advanced" },
     { "path": "packages/adapters" },
     { "path": "apps/worker" },
-    { "path": "apps/mcp-server" }
+    { "path": "apps/mcp-server" },
+    { "path": "apps/webhook-server" }
   ],
   "files": []
 }

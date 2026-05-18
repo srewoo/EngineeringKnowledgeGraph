@@ -27,6 +27,7 @@ import { EmbeddingsService } from './embeddings.service.js';
 import { SearchIndexService } from './search-index.service.js';
 import { UrlApiLinker } from './url.api.linker.js';
 import { HistoryPass } from './history.pass.js';
+import { SchemaDriftDetector } from './schema.drift.js';
 import type { UnresolvedHttpRepository } from '@ekg/storage';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
@@ -70,6 +71,7 @@ export class IngestionService {
   private readonly searchIndexService?: SearchIndexService;
   private readonly urlApiLinker: UrlApiLinker;
   private readonly historyPass: HistoryPass;
+  private readonly driftDetector: SchemaDriftDetector;
   private readonly logger: Logger;
 
   constructor(
@@ -92,6 +94,7 @@ export class IngestionService {
     this.searchIndexService = searchIndexService;
     this.urlApiLinker = new UrlApiLinker(neo4jClient, unresolvedHttpRepo);
     this.historyPass = new HistoryPass();
+    this.driftDetector = new SchemaDriftDetector();
     this.logger = createLogger({ service: 'ingestion-service' });
   }
 
@@ -343,6 +346,30 @@ export class IngestionService {
         allNodes,
         allRels,
       );
+    }
+
+    // Schema drift detection — if this incremental ingest landed any
+    // new Migration / Table / Column nodes, invalidate stale Function /
+    // Doc / Table embeddings so they get refreshed on the next embed pass.
+    if (this.embeddingsService?.enabled) {
+      const drift = this.driftDetector.detect(
+        allNodes,
+        allRels,
+        this.embeddingsService.getRepository(),
+      );
+      if (drift.drifted) {
+        this.logger.info(
+          {
+            repoUrl: options.repoUrl,
+            newMigrations: drift.newMigrations.length,
+            newTables: drift.newTables.length,
+            newColumns: drift.newColumns.length,
+            affectedServices: drift.affectedServices,
+          },
+          'Schema drift detected — invalidating affected embeddings',
+        );
+        this.embeddingsService.invalidateAfterSchemaDrift(options.repoUrl);
+      }
     }
 
     // Best-effort embeddings on the freshly re-parsed nodes only.

@@ -35,6 +35,7 @@ export const adapterConfigSchema = z
     enabled: z.boolean().default(false),
     transport: z.enum(['stdio', 'sse', 'http']).default('stdio'),
     command: z.string().optional(),
+    args: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
     serviceMapping: serviceMappingSchema.default('auto'),
     capabilities: z.array(adapterCapabilitySchema),

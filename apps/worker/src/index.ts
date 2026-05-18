@@ -17,3 +17,5 @@ export { EmbeddingsService } from './embeddings.service.js';
 export type { EmbeddingsServiceOptions } from './embeddings.service.js';
 export { SearchIndexService } from './search-index.service.js';
 export type { SearchIndexServiceOptions } from './search-index.service.js';
+export { SchemaDriftDetector } from './schema.drift.js';
+export type { DriftSignal } from './schema.drift.js';

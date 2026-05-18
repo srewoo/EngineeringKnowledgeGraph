@@ -16,6 +16,8 @@ import {
   MetadataScanner,
   TypeScriptParserPool,
   MultiLanguageParser,
+  MultiLangSymbolsParser,
+  KafkaMultiLangExtractor,
 } from '@ekg/parser';
 import type { CodeOwnerRule } from '@ekg/parser';
 import type {
@@ -26,6 +28,10 @@ import { ImportExtractor } from './import.extractor.js';
 import { ServiceDetector } from './service.detector.js';
 import { MarkdownExtractor } from './markdown.extractor.js';
 import { SchemaPrismaExtractor } from './schema.prisma.extractor.js';
+import { SchemaTsOrmExtractor } from './schema.ts.orm.extractor.js';
+import { SchemaPythonExtractor } from './schema.python.extractor.js';
+import { SchemaGoExtractor } from './schema.go.extractor.js';
+import { SchemaSqlExtractor } from './schema.sql.extractor.js';
 import { OpenApiExtractor } from './openapi.extractor.js';
 import { SymbolsExtractor } from './symbols.extractor.js';
 import { HelmValuesExtractor } from './helm.values.extractor.js';
@@ -44,10 +50,16 @@ export class ExtractionPipeline {
   private readonly metadataScanner: MetadataScanner;
   private readonly tsPool: TypeScriptParserPool;
   private readonly multiParser: MultiLanguageParser;
+  private readonly multiSymbolsParser: MultiLangSymbolsParser;
+  private readonly multiKafkaExtractor: KafkaMultiLangExtractor;
   private readonly importExtractor: ImportExtractor;
   private readonly serviceDetector: ServiceDetector;
   private readonly markdownExtractor: MarkdownExtractor;
   private readonly prismaExtractor: SchemaPrismaExtractor;
+  private readonly tsOrmExtractor: SchemaTsOrmExtractor;
+  private readonly pythonOrmExtractor: SchemaPythonExtractor;
+  private readonly goOrmExtractor: SchemaGoExtractor;
+  private readonly sqlExtractor: SchemaSqlExtractor;
   private readonly openApiExtractor: OpenApiExtractor;
   private readonly symbolsExtractor: SymbolsExtractor;
   private readonly helmExtractor: HelmValuesExtractor;
@@ -64,10 +76,16 @@ export class ExtractionPipeline {
     this.metadataScanner = new MetadataScanner();
     this.tsPool = new TypeScriptParserPool();
     this.multiParser = new MultiLanguageParser();
+    this.multiSymbolsParser = new MultiLangSymbolsParser();
+    this.multiKafkaExtractor = new KafkaMultiLangExtractor();
     this.importExtractor = new ImportExtractor();
     this.serviceDetector = new ServiceDetector();
     this.markdownExtractor = new MarkdownExtractor();
     this.prismaExtractor = new SchemaPrismaExtractor();
+    this.tsOrmExtractor = new SchemaTsOrmExtractor();
+    this.pythonOrmExtractor = new SchemaPythonExtractor();
+    this.goOrmExtractor = new SchemaGoExtractor();
+    this.sqlExtractor = new SchemaSqlExtractor();
     this.openApiExtractor = new OpenApiExtractor();
     this.symbolsExtractor = new SymbolsExtractor();
     this.helmExtractor = new HelmValuesExtractor();
@@ -237,6 +255,46 @@ export class ExtractionPipeline {
           allRelationships.push(...symResult.relationships);
         }
 
+        // Phase #2 — function/class symbols for Python and Go (regex).
+        // MultiLanguageParser doesn't populate `symbols`, so we run a
+        // dedicated parser for these languages and feed the same
+        // SymbolsExtractor used by TS.
+        const fileExt = extname(file.absolutePath).toLowerCase();
+        const needSymbols = !result.symbols && MultiLangSymbolsParser.handles(fileExt);
+        const needKafka = !result.kafka && KafkaMultiLangExtractor.handles(fileExt);
+        if (needSymbols || needKafka) {
+          try {
+            const content = await readFile(file.absolutePath, 'utf8');
+            if (needSymbols) {
+              const lang = MultiLangSymbolsParser.detectLanguage(fileExt)!;
+              const parsedSyms = this.multiSymbolsParser.parse(content, result.filePath, lang);
+              const fileNode = extraction.nodes.find((n) => n.label === 'File');
+              const language = (fileNode?.properties as { language?: string } | undefined)?.language ?? lang;
+              const symResult = this.symbolsExtractor.extract(parsedSyms, repoUrl, result.filePath, language);
+              allNodes.push(...symResult.nodes);
+              allRelationships.push(...symResult.relationships);
+            }
+            if (needKafka) {
+              const lang = KafkaMultiLangExtractor.detectLanguage(fileExt)!;
+              const kafka = this.multiKafkaExtractor.extract(content, lang);
+              if (kafka.producers.length > 0 || kafka.consumers.length > 0) {
+                const svc = this.findServiceForFile(file.relativePath, servicesByDirLen);
+                if (svc) {
+                  this.emitKafkaEdges(
+                    { ...result, kafka },
+                    svc.name,
+                    repoUrl,
+                    allNodes,
+                    allRelationships,
+                  );
+                }
+              }
+            }
+          } catch {
+            // best-effort — skip on read/parse failure
+          }
+        }
+
         const matchingService = this.findServiceForFile(file.relativePath, servicesByDirLen);
         if (matchingService) {
           allRelationships.push({
@@ -320,6 +378,26 @@ export class ExtractionPipeline {
       repoUrl,
       servicesByDirLen,
       handledSpecPaths,
+      allNodes,
+      allRelationships,
+    );
+
+    // Step 3.6.4: Raw SQL DDL + Liquibase changelogs.
+    await this.extractSqlSchemas(
+      files,
+      repoUrl,
+      servicesByDirLen,
+      allNodes,
+      allRelationships,
+    );
+
+    // Step 3.6.5: ORM schema extraction across TS / Python / Go. Re-reads
+    // matching source files but only those that pass a cheap content sniff,
+    // so the I/O cost is bounded.
+    await this.extractOrmSchemas(
+      files,
+      repoUrl,
+      servicesByDirLen,
       allNodes,
       allRelationships,
     );
@@ -615,6 +693,127 @@ export class ExtractionPipeline {
           confidence: 'HIGH',
           properties: { source: 'prisma-extractor' },
         });
+      }
+    }
+  }
+
+  /**
+   * Phase 1.4 (raw SQL + Liquibase) — emit Migration nodes plus Table/Column
+   * nodes from CREATE TABLE statements, and ALTERS edges for ALTER/DROP.
+   */
+  private async extractSqlSchemas(
+    files: readonly { absolutePath: string; relativePath: string }[],
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    for (const file of files) {
+      if (!SchemaSqlExtractor.handles(file.relativePath)) continue;
+      let content: string;
+      try {
+        content = await readFile(file.absolutePath, 'utf8');
+      } catch {
+        continue;
+      }
+      const result = this.sqlExtractor.extract(content, file.relativePath, repoUrl);
+      if (result.migrations.length === 0) continue;
+
+      allNodes.push(...result.migrations);
+      allNodes.push(...result.tables);
+      allNodes.push(...result.columns);
+      allRelationships.push(...result.relations);
+
+      const owningService = this.findServiceForFile(file.relativePath, servicesByDirLen);
+      const fileId = `${repoUrl}:${file.absolutePath}`;
+      for (const tbl of result.tables) {
+        allRelationships.push({
+          type: 'CONTAINS',
+          sourceId: fileId,
+          targetId: tbl.id,
+          confidence: 'HIGH',
+          properties: { source: 'sql-extractor' },
+        });
+        if (owningService) {
+          allRelationships.push({
+            type: 'OWNS',
+            sourceId: `service:${owningService.name}`,
+            targetId: tbl.id,
+            confidence: 'HIGH',
+            properties: { source: 'sql-extractor' },
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Phase 1.4 — walk source files, content-sniff for TypeORM/Drizzle/Sequelize
+   * (.ts/.js), SQLAlchemy/Django (.py), and GORM/sqlc (.go). Emit Table +
+   * Column nodes with File→Table (CONTAINS) and Service→Table (OWNS) edges.
+   */
+  private async extractOrmSchemas(
+    files: readonly { absolutePath: string; relativePath: string }[],
+    repoUrl: string,
+    servicesByDirLen: readonly { name: string; directory: string }[],
+    allNodes: GraphNode[],
+    allRelationships: GraphRelationship[],
+  ): Promise<void> {
+    for (const file of files) {
+      const ext = extname(file.absolutePath).toLowerCase();
+      let kind: 'ts' | 'py' | 'go' | undefined;
+      if (TS_EXTENSIONS.has(ext)) kind = 'ts';
+      else if (ext === '.py') kind = 'py';
+      else if (ext === '.go') kind = 'go';
+      if (!kind) continue;
+
+      let content: string;
+      try {
+        content = await readFile(file.absolutePath, 'utf8');
+      } catch {
+        continue;
+      }
+
+      let result: { tables: readonly GraphNode[]; columns: readonly GraphNode[]; relations: readonly GraphRelationship[] };
+      let source: string;
+      if (kind === 'ts') {
+        if (!SchemaTsOrmExtractor.handles(content)) continue;
+        result = this.tsOrmExtractor.extract(content, file.relativePath, repoUrl);
+        source = 'ts-orm-extractor';
+      } else if (kind === 'py') {
+        if (!SchemaPythonExtractor.handles(content)) continue;
+        result = this.pythonOrmExtractor.extract(content, file.relativePath, repoUrl);
+        source = 'python-orm-extractor';
+      } else {
+        if (!SchemaGoExtractor.handles(content, file.relativePath)) continue;
+        result = this.goOrmExtractor.extract(content, file.relativePath, repoUrl);
+        source = 'go-orm-extractor';
+      }
+      if (result.tables.length === 0) continue;
+
+      const fileId = `${repoUrl}:${file.absolutePath}`;
+      allNodes.push(...result.tables);
+      allNodes.push(...result.columns);
+      allRelationships.push(...result.relations);
+
+      const owningService = this.findServiceForFile(file.relativePath, servicesByDirLen);
+      for (const table of result.tables) {
+        allRelationships.push({
+          type: 'CONTAINS',
+          sourceId: fileId,
+          targetId: table.id,
+          confidence: 'HIGH',
+          properties: { source },
+        });
+        if (owningService) {
+          allRelationships.push({
+            type: 'OWNS',
+            sourceId: `service:${owningService.name}`,
+            targetId: table.id,
+            confidence: 'HIGH',
+            properties: { source },
+          });
+        }
       }
     }
   }

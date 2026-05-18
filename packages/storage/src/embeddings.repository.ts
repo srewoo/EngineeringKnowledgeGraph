@@ -152,6 +152,31 @@ export class EmbeddingsRepository {
     return info.changes;
   }
 
+  /**
+   * Delete all embeddings for a single label within a repo. Used to
+   * invalidate stale Function/Doc/Table embeddings after a schema-drift
+   * event so the next ingest re-embeds them with the new context.
+   */
+  deleteByLabelAndRepo(label: string, repoUrl: string): number {
+    const info = this.db
+      .prepare('DELETE FROM embeddings WHERE label = ? AND repo_url = ?')
+      .run(label, repoUrl);
+    this.logger.info(
+      { label, repoUrl, deleted: info.changes },
+      'Embeddings invalidated by label',
+    );
+    return info.changes;
+  }
+
+  deleteByNodeIds(nodeIds: readonly string[]): number {
+    if (nodeIds.length === 0) return 0;
+    const placeholders = nodeIds.map(() => '?').join(',');
+    const info = this.db
+      .prepare(`DELETE FROM embeddings WHERE node_id IN (${placeholders})`)
+      .run(...nodeIds);
+    return info.changes;
+  }
+
   countAll(): number {
     const row = this.db.prepare('SELECT COUNT(*) as c FROM embeddings').get() as { c: number };
     return row.c;

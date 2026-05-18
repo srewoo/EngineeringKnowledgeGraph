@@ -37,3 +37,13 @@ export { DatadogAdapter } from './datadog/datadog.adapter.js';
 export type { DatadogAdapterOptions } from './datadog/datadog.adapter.js';
 export { createDatadogAdapter } from './datadog/datadog.factory.js';
 export { DatadogRuntimeProvider } from './datadog/datadog.runtime.bridge.js';
+
+export { McpStdioClient, splitCommand, tryParseJsonContent } from './mcp.client.js';
+export type { McpStdioOptions, CallToolResult } from './mcp.client.js';
+
+export { AtlassianAdapter, createAtlassianAdapter } from './atlassian/atlassian.adapter.js';
+export type { AtlassianAdapterOptions } from './atlassian/atlassian.adapter.js';
+export { MixpanelAdapter, createMixpanelAdapter } from './mixpanel/mixpanel.adapter.js';
+export type { MixpanelAdapterOptions } from './mixpanel/mixpanel.adapter.js';
+export { LokiAdapter, createLokiAdapter } from './loki/loki.adapter.js';
+export type { LokiAdapterOptions } from './loki/loki.adapter.js';

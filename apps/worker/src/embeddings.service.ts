@@ -88,6 +88,25 @@ export class EmbeddingsService {
     }
   }
 
+  /**
+   * Invalidate stale embeddings after a schema-drift event so the next
+   * embed pass refreshes the affected nodes. Conservative scope: drop
+   * all Function / Doc / Table embeddings for the repo. Cost is bounded
+   * because drift events are rare (one per migration commit).
+   */
+  invalidateAfterSchemaDrift(repoUrl: string): { deleted: number } {
+    if (!this.enabled || !this.repo) return { deleted: 0 };
+    let deleted = 0;
+    for (const label of ['Function', 'Doc', 'Table'] as const) {
+      deleted += this.repo.deleteByLabelAndRepo(label, repoUrl);
+    }
+    this.logger.info(
+      { repoUrl, deleted },
+      'Embeddings invalidated after schema-drift event',
+    );
+    return { deleted };
+  }
+
   close(): void {
     this.repo?.close();
   }

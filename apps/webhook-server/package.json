@@ -1,22 +1,28 @@
 {
-  "name": "@ekg/adapters",
+  "name": "@ekg/webhook-server",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "bin": {
+    "ekg-webhook": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc --build",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
     "test": "vitest run",
-    "test:watch": "vitest",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
     "@ekg/shared": "*",
-    "@ekg/advanced": "*",
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "zod": "^3.23.0"
+    "@ekg/storage": "*",
+    "@ekg/graph": "*",
+    "@ekg/worker": "*",
+    "dotenv": "^17.4.2",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
   }

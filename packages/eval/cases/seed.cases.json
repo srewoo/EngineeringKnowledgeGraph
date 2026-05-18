@@ -1,0 +1,142 @@
+[
+  {
+    "id": "topo-001",
+    "question": "What services depend on user-service?",
+    "expectedClass": "topology",
+    "goldCitations": ["Service:user-service"],
+    "tags": ["topology", "deps"]
+  },
+  {
+    "id": "topo-002",
+    "question": "Which databases does the orders service use?",
+    "expectedClass": "topology",
+    "goldCitations": ["Service:orders", "Database:postgres"],
+    "tags": ["topology", "db"]
+  },
+  {
+    "id": "topo-003",
+    "question": "Show me the dependency graph between billing and notification services.",
+    "expectedClass": "topology",
+    "goldCitations": ["Service:billing", "Service:notification"],
+    "tags": ["topology"]
+  },
+  {
+    "id": "schema-001",
+    "question": "Which column on the users table marks an account as deleted?",
+    "expectedClass": "schema",
+    "goldCitations": ["Table:users", "Column:users.deleted_at"],
+    "tags": ["schema", "soft-delete"]
+  },
+  {
+    "id": "schema-002",
+    "question": "What is the primary key of the orders table?",
+    "expectedClass": "schema",
+    "goldCitations": ["Table:orders", "Column:orders.id"],
+    "tags": ["schema", "pk"]
+  },
+  {
+    "id": "schema-003",
+    "question": "List the foreign keys on the order_items table.",
+    "expectedClass": "schema",
+    "goldCitations": ["Table:order_items", "Table:orders", "Table:products"],
+    "tags": ["schema", "fk"]
+  },
+  {
+    "id": "code-001",
+    "question": "Where do we calculate proficiency score?",
+    "expectedClass": "code",
+    "goldCitations": ["Function:calculateProficiencyScore"],
+    "tags": ["code"]
+  },
+  {
+    "id": "code-002",
+    "question": "Show me the function that validates JWT tokens.",
+    "expectedClass": "code",
+    "goldCitations": ["Function:verifyJwt"],
+    "tags": ["code", "auth"]
+  },
+  {
+    "id": "flow-001",
+    "question": "What happens end-to-end when a learner starts a course?",
+    "expectedClass": "flow",
+    "goldCitations": ["Service:lms", "API:POST /courses/:id/start", "Topic:course.started"],
+    "tags": ["flow"]
+  },
+  {
+    "id": "flow-002",
+    "question": "Trace the request path for creating a coaching session.",
+    "expectedClass": "flow",
+    "goldCitations": ["API:POST /coaching/sessions", "Service:coaching"],
+    "tags": ["flow", "api"]
+  },
+  {
+    "id": "api-001",
+    "question": "Which endpoint creates a coaching session?",
+    "expectedClass": "api",
+    "goldCitations": ["API:POST /coaching/sessions"],
+    "tags": ["api"]
+  },
+  {
+    "id": "api-002",
+    "question": "List all GET endpoints under /admin.",
+    "expectedClass": "api",
+    "goldCitations": ["API:GET /admin/users", "API:GET /admin/audit"],
+    "tags": ["api"]
+  },
+  {
+    "id": "owner-001",
+    "question": "Who owns the AI prompt store?",
+    "expectedClass": "ownership",
+    "goldCitations": ["Team:ai-platform", "Service:prompt-store"],
+    "tags": ["ownership"]
+  },
+  {
+    "id": "owner-002",
+    "question": "Which team owns the billing service?",
+    "expectedClass": "ownership",
+    "goldCitations": ["Team:revenue", "Service:billing"],
+    "tags": ["ownership"]
+  },
+  {
+    "id": "config-001",
+    "question": "Which env var controls Snowflake credentials?",
+    "expectedClass": "config",
+    "goldCitations": ["ConfigKey:SNOWFLAKE_PASSWORD", "SecretRef:vault/snowflake"],
+    "tags": ["config", "secret"]
+  },
+  {
+    "id": "config-002",
+    "question": "What is the default Redis URL in the user-service Helm chart?",
+    "expectedClass": "config",
+    "goldCitations": ["ConfigKey:REDIS_URL", "Service:user-service"],
+    "tags": ["config", "helm"]
+  },
+  {
+    "id": "ops-001",
+    "question": "Which Kafka topics does callAI consume?",
+    "expectedClass": "ops",
+    "goldCitations": ["Service:callAI", "Topic:transcript.ready", "Topic:call.ended"],
+    "tags": ["ops", "kafka"]
+  },
+  {
+    "id": "ops-002",
+    "question": "What services produce events to the audit.log topic?",
+    "expectedClass": "ops",
+    "goldCitations": ["Topic:audit.log"],
+    "tags": ["ops", "kafka"]
+  },
+  {
+    "id": "history-001",
+    "question": "When did we add the internal/external classification on accounts?",
+    "expectedClass": "history",
+    "goldCitations": ["Migration:V42__add_account_kind", "Column:accounts.kind"],
+    "tags": ["history", "migration"]
+  },
+  {
+    "id": "history-002",
+    "question": "Who last modified the auth middleware in user-service?",
+    "expectedClass": "history",
+    "goldCitations": ["Commit:abc123", "File:user-service/src/middleware/auth.ts"],
+    "tags": ["history", "git"]
+  }
+]

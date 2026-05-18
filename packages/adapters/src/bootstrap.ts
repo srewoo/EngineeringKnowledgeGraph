@@ -15,6 +15,9 @@ import { loadAdapterConfig, expandEnvRefs, type AdapterConfig } from './adapter.
 import { createDatadogAdapter } from './datadog/datadog.factory.js';
 import { DatadogAdapter } from './datadog/datadog.adapter.js';
 import { DatadogRuntimeProvider } from './datadog/datadog.runtime.bridge.js';
+import { createAtlassianAdapter } from './atlassian/atlassian.adapter.js';
+import { createMixpanelAdapter } from './mixpanel/mixpanel.adapter.js';
+import { createLokiAdapter } from './loki/loki.adapter.js';
 
 const logger = createLogger({ service: 'adapters.bootstrap' });
 
@@ -22,6 +25,9 @@ export type AdapterFactory = (ctx: AdapterContext) => McpAdapter;
 
 const DEFAULT_FACTORIES: Readonly<Record<string, AdapterFactory>> = {
   datadog: (ctx) => createDatadogAdapter(ctx),
+  atlassian: (ctx) => createAtlassianAdapter(ctx),
+  mixpanel: (ctx) => createMixpanelAdapter(ctx),
+  loki: (ctx) => createLokiAdapter(ctx),
 };
 
 export interface BootstrapOptions {
