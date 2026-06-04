@@ -8,8 +8,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createLogger } from '@ekg/shared';
 import { Neo4jClient } from '@ekg/graph';
-import { GraphQueries } from '@ekg/graph';
-import { SqliteRepository, SnapshotRepository, DlqRepository, UnresolvedHttpRepository } from '@ekg/storage';
+import { GraphQueries, GraphRepository } from '@ekg/graph';
+import { SqliteRepository, SnapshotRepository, DlqRepository, UnresolvedHttpRepository, AuditRepository } from '@ekg/storage';
 import { RuntimeProviderRegistry } from '@ekg/advanced';
 import { AdapterRegistry, CapabilityRouter } from '@ekg/adapters';
 import { IngestionService, BulkIngestionService, ServiceResolver } from '@ekg/worker';
@@ -54,6 +54,23 @@ import { registerRetryDlqTool } from './tools/retry-dlq.tool.js';
 import { registerCodeGrepTool } from './tools/code-grep.tool.js';
 import { registerGitlabGetMrTool } from './tools/gitlab-get-mr.tool.js';
 import { registerCompareDependenciesTool } from './tools/compare-dependencies.tool.js';
+// Phase B — git history surfaced via MCP.
+import { registerHistoryTool } from './tools/history.tool.js';
+// Phase C — runtime adapter edges materialised into the graph.
+import { registerMaterializeRuntimeEdgesTool } from './tools/materialize-runtime-edges.tool.js';
+// Phase D — node-level vector search via Neo4j vector index.
+import { registerSearchByVectorTool } from './tools/search-by-vector.tool.js';
+// Phase E — test coverage queries.
+import { registerCoverageTool } from './tools/coverage.tool.js';
+// Item 4 — provenance / per-extractor coverage report.
+import { registerCoverageReportTool } from './tools/coverage-report.tool.js';
+// Item 5 — confidence calibration measurement.
+import { registerCalibrationTool } from './tools/calibration.tool.js';
+// Phase G — data lineage queries.
+import { registerLineageTool } from './tools/lineage.tool.js';
+
+// Phase 2 multi-tenant — server-wide audit + tenant scope wrapper.
+import { withServerAudit } from './middleware/audit.server.js';
 
 // Resources
 import { registerGraphStatsResource } from './resources/graph-stats.resource.js';
@@ -74,6 +91,10 @@ export interface ServerDependencies {
   readonly searchTextRepo?: SearchTextRepository;
   readonly runtimeRegistry?: RuntimeProviderRegistry;
   readonly adapterRegistry?: AdapterRegistry;
+  /** Phase 2 multi-tenant. Default 'local'; set per-deployment in hosted mode. */
+  readonly deploymentMode?: 'local' | 'hosted';
+  /** Phase 2 multi-tenant — defaults to 'local'. */
+  readonly defaultTenantId?: string;
   readonly gitlabConfig: {
     readonly gitlabUrl: string;
     readonly token: string;
@@ -86,10 +107,22 @@ export interface ServerDependencies {
 export function createMcpServer(deps: ServerDependencies): McpServer {
   const logger: Logger = createLogger({ service: 'mcp-server' });
 
-  const server = new McpServer({
+  const rawServer = new McpServer({
     name: 'ekg-mcp-server',
     version: '0.1.0',
   });
+
+  // Phase 2 multi-tenant: wrap the server so every tool registration
+  // automatically gets tenant context derivation + audit logging.
+  // Existing tool registration functions need no changes.
+  const auditRepo = new AuditRepository(deps.sqliteRepo.getConnection());
+  const hosted = (deps.deploymentMode ?? 'local') === 'hosted';
+  const server = withServerAudit(rawServer, {
+    defaultTenantId: deps.defaultTenantId ?? 'local',
+    audit: auditRepo,
+    hosted,
+  });
+  logger.info({ hosted, defaultTenantId: deps.defaultTenantId ?? 'local' }, 'MCP server audit/tenant middleware enabled');
 
   logger.info('Registering MCP tools, resources, and prompts');
 
@@ -110,6 +143,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   registerAnalyzeImpactTool(server, deps.graphQueries);
   registerGetServiceSummaryTool(server, deps.graphQueries);
   registerGetApiMapTool(server, deps.graphQueries);
+  registerHistoryTool(server, deps.graphQueries);
   registerGetIngestionStatusTool(server, deps.sqliteRepo, deps.bulkService);
   registerDiscoverReposTool(server, {
     gitlabUrl: deps.gitlabConfig.gitlabUrl,
@@ -160,6 +194,15 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   const capabilityRouter = new CapabilityRouter(adapterRegistry);
   registerListAdaptersTool(server, adapterRegistry);
   registerAdapterQueryTool(server, capabilityRouter);
+  registerMaterializeRuntimeEdgesTool(server, { registry: adapterRegistry, neo4jClient: deps.neo4jClient });
+  registerSearchByVectorTool(server, {
+    queries: deps.graphQueries,
+    ...(deps.embeddingsService ? { embeddings: deps.embeddingsService } : {}),
+  });
+  registerCoverageTool(server, deps.graphQueries);
+  registerCoverageReportTool(server, deps.graphQueries);
+  registerCalibrationTool(server, deps.graphQueries);
+  registerLineageTool(server, deps.graphQueries);
 
   // Phase 1.1 — DLQ surface for bulk-ingestion reliability.
   const dlqRepo = new DlqRepository(deps.sqliteRepo.getConnection());
@@ -173,13 +216,14 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
 
   // Phase 1.5 — surface unresolved cross-service HTTP calls.
   const unresolvedHttpRepo = new UnresolvedHttpRepository(deps.sqliteRepo.getConnection());
-  registerListUnresolvedHttpCallsTool(server, unresolvedHttpRepo);
+  registerListUnresolvedHttpCallsTool(server, unresolvedHttpRepo, deps.graphQueries);
 
   // New: code search, GitLab MR review, declared-vs-runtime dep diff.
   registerCodeGrepTool(server, { dataDir: deps.dataDir });
   registerGitlabGetMrTool(server, {
     gitlabUrl: deps.gitlabConfig.gitlabUrl,
     token: deps.gitlabConfig.token,
+    graphRepo: new GraphRepository(deps.neo4jClient),
   });
   registerCompareDependenciesTool(server, {
     neo4jClient: deps.neo4jClient,
@@ -195,7 +239,7 @@ export function createMcpServer(deps: ServerDependencies): McpServer {
   // Register prompts (2 total)
   registerPrompts(server);
 
-  logger.info('MCP server configured: 31 tools, 4 resources, 2 prompts');
+  logger.info('MCP server configured: 33 tools, 4 resources, 2 prompts');
 
   return server;
 }

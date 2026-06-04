@@ -12,9 +12,12 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "tsc --build",
-    "lint": "eslint . --ext .ts",
+    "lint": "eslint .",
     "dev:mcp": "npm run dev -w apps/mcp-server",
     "dev:worker": "npm run dev -w apps/worker",
+    "eval:gate": "npm run build -w @ekg/eval && node packages/eval/dist/cli.js gate",
+    "eval:gate:update": "npm run build -w @ekg/eval && node packages/eval/dist/cli.js gate --update-baseline",
+    "eval:calibration": "npm run build -w @ekg/eval && node packages/eval/dist/calibration.report.js",
     "clean": "rm -rf packages/*/dist apps/*/dist"
   },
   "engines": {
@@ -22,5 +25,10 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "typescript-eslint": "^8.60.1"
   }
 }

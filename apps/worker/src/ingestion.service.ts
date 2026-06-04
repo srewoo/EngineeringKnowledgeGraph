@@ -27,6 +27,8 @@ import { EmbeddingsService } from './embeddings.service.js';
 import { SearchIndexService } from './search-index.service.js';
 import { UrlApiLinker } from './url.api.linker.js';
 import { HistoryPass } from './history.pass.js';
+import { TestCasesPass } from './test.cases.pass.js';
+import { DataLineagePass } from './data.lineage.pass.js';
 import { SchemaDriftDetector } from './schema.drift.js';
 import type { UnresolvedHttpRepository } from '@ekg/storage';
 import { createHash } from 'node:crypto';
@@ -71,6 +73,8 @@ export class IngestionService {
   private readonly searchIndexService?: SearchIndexService;
   private readonly urlApiLinker: UrlApiLinker;
   private readonly historyPass: HistoryPass;
+  private readonly testCasesPass: TestCasesPass;
+  private readonly dataLineagePass: DataLineagePass;
   private readonly driftDetector: SchemaDriftDetector;
   private readonly logger: Logger;
 
@@ -94,6 +98,8 @@ export class IngestionService {
     this.searchIndexService = searchIndexService;
     this.urlApiLinker = new UrlApiLinker(neo4jClient, unresolvedHttpRepo);
     this.historyPass = new HistoryPass();
+    this.testCasesPass = new TestCasesPass();
+    this.dataLineagePass = new DataLineagePass();
     this.driftDetector = new SchemaDriftDetector();
     this.logger = createLogger({ service: 'ingestion-service' });
   }
@@ -229,6 +235,38 @@ export class IngestionService {
       this.logger.warn({ err, jobId }, 'History pass failed (continuing)');
     }
 
+    // Phase E — TestCase nodes + TESTS coverage edges. Pure derivation from
+    // already-extracted nodes + IMPORTS edges; cheap, best-effort.
+    try {
+      const tests = this.testCasesPass.run({
+        repoUrl: options.repoUrl,
+        nodes: extraction.nodes,
+        relationships: extraction.relationships,
+      });
+      if (tests.newNodes.length > 0) {
+        await this.graphRepo.mergeNodes(tests.newNodes);
+      }
+      if (tests.newRelationships.length > 0) {
+        edgesCreated += await this.graphRepo.mergeRelationships(tests.newRelationships);
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'Test cases pass failed (continuing)');
+    }
+
+    // Phase G — data lineage: API → Column edges derived from API schemas
+    // matched against the API's owning service's tables. Pure, cheap.
+    try {
+      const lineage = this.dataLineagePass.run({
+        nodes: extraction.nodes,
+        relationships: extraction.relationships,
+      });
+      if (lineage.newRelationships.length > 0) {
+        edgesCreated += await this.graphRepo.mergeRelationships(lineage.newRelationships);
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'Data lineage pass failed (continuing)');
+    }
+
     // Best-effort BM25 indexing — always-on, local + free.
     if (this.searchIndexService) {
       await this.searchIndexService.indexFromExtraction(
@@ -323,7 +361,28 @@ export class IngestionService {
     }
 
     const nodesCreated = await this.graphRepo.mergeNodes(allNodes);
-    const edgesCreated = await this.graphRepo.mergeRelationships(allRels);
+    let edgesCreated = await this.graphRepo.mergeRelationships(allRels);
+
+    // Phase 1.7 — keep the Commit -[TOUCHED]-> File history graph fresh on
+    // incremental ingests too. Without this, new commits touching changed
+    // files were invisible until the next full re-ingest (history drift).
+    // Scoped to the re-parsed File nodes, so the git-log walk only emits
+    // TOUCHED edges for files that changed in this commit. Best-effort.
+    try {
+      const history = await this.historyPass.run({
+        repoUrl: options.repoUrl,
+        localPath,
+        nodes: allNodes,
+      });
+      if (history.newNodes.length > 0) {
+        await this.graphRepo.mergeNodes(history.newNodes);
+      }
+      if (history.newRelationships.length > 0) {
+        edgesCreated += await this.graphRepo.mergeRelationships(history.newRelationships);
+      }
+    } catch (err) {
+      this.logger.warn({ err, jobId }, 'History pass failed on incremental (continuing)');
+    }
 
     for (const m of fileMetaUpdates) {
       this.sqliteRepo.upsertFileMetadata({

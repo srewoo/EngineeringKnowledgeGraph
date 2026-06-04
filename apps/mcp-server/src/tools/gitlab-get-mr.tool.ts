@@ -19,6 +19,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { GitLabClient } from '@ekg/parser';
 import { createLogger } from '@ekg/shared';
+import type { GraphRepository, MrSubgraphInput } from '@ekg/graph';
 
 const logger = createLogger({ service: 'tool.gitlab_get_mr' });
 
@@ -34,6 +35,8 @@ interface ParsedMrUrl {
 export interface GitlabGetMrDeps {
   readonly gitlabUrl: string;
   readonly token: string;
+  /** Optional. When provided + `persist: true` the MR is written into the graph. */
+  readonly graphRepo?: GraphRepository;
 }
 
 export function registerGitlabGetMrTool(server: McpServer, deps: GitlabGetMrDeps): void {
@@ -45,8 +48,9 @@ export function registerGitlabGetMrTool(server: McpServer, deps: GitlabGetMrDeps
       projectPath: z.string().optional().describe('Namespace/project path. Required if `url` is omitted.'),
       iid: z.number().int().positive().optional().describe('MR iid (project-relative). Required if `url` is omitted.'),
       maxDiscussions: z.number().int().min(0).max(100).default(30),
+      persist: z.boolean().default(false).describe('Phase B: when true, also write an MR node + Owner + AUTHORED_MR + MERGED_AS edges into the graph for later queries. Idempotent.'),
     },
-    async ({ url, projectPath, iid, maxDiscussions }) => {
+    async ({ url, projectPath, iid, maxDiscussions, persist }) => {
       if (!deps.token) {
         return errOut('GIT_TOKEN not set — cannot call GitLab API.');
       }
@@ -77,8 +81,26 @@ export function registerGitlabGetMrTool(server: McpServer, deps: GitlabGetMrDeps
 
         const summary = summarise(mr, changes, discussions.slice(0, maxDiscussions), pipelines.slice(0, 5), approvals);
         logger.info({ mr: parsed.mrIid, project: parsed.projectPath }, 'gitlab_get_mr');
+
+        let persisted: { mrMerged: boolean; authoredMerged: boolean; mergedAsCreated: boolean } | undefined;
+        if (persist) {
+          if (!deps.graphRepo) {
+            logger.warn('persist=true requested but graphRepo not wired — skipping persistence');
+          } else {
+            try {
+              persisted = await persistMr(deps.graphRepo, parsed, mr, summary.diff);
+            } catch (perr) {
+              const msg = perr instanceof Error ? perr.message : String(perr);
+              logger.warn({ err: msg, mr: parsed.mrIid }, 'MR persistence failed (continuing)');
+            }
+          }
+        }
+
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(persisted ? { ...summary, persisted } : summary, null, 2),
+          }],
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -304,4 +326,56 @@ function countDiffLines(diff: string): { added: number; removed: number } {
 
 function errOut(msg: string): { content: { type: 'text'; text: string }[]; isError: true } {
   return { content: [{ type: 'text' as const, text: msg }], isError: true };
+}
+
+// ---- Phase B: graph persistence ----
+
+/**
+ * Build the MR subgraph input + author Owner record and write them via the
+ * repo. Kept separate so the GitLab fetch logic stays focused on the API.
+ *
+ * MR id is the canonical web URL — stable, globally unique, agent-pasteable.
+ * Owner id is `<gitlabHost>#user:<username>` to scope owners per host (the
+ * same username on a different GitLab instance is a different person).
+ */
+async function persistMr(
+  graphRepo: GraphRepository,
+  parsed: ParsedMrUrl,
+  mr: MrPayload,
+  diff: DiffStats,
+): Promise<{ mrMerged: boolean; authoredMerged: boolean; mergedAsCreated: boolean }> {
+  const authorUsername = mr.author?.username ?? mr.author?.name ?? 'unknown';
+  const authorId = `${parsed.gitlabUrl}#user:${authorUsername}`;
+  const mrId = mr.web_url;
+
+  const input: MrSubgraphInput = {
+    id: mrId,
+    name: `!${mr.iid} ${mr.title}`.slice(0, 200),
+    properties: {
+      iid: mr.iid,
+      projectPath: parsed.projectPath,
+      title: mr.title,
+      state: mr.state,
+      author: authorUsername,
+      sourceBranch: mr.source_branch,
+      targetBranch: mr.target_branch,
+      headSha: mr.diff_refs?.head_sha ?? mr.sha ?? null,
+      labels: mr.labels ?? [],
+      webUrl: mr.web_url,
+      createdAt: mr.created_at ?? null,
+      updatedAt: mr.updated_at ?? null,
+      filesChanged: diff.filesChanged,
+      diffSize: diff.added + diff.removed,
+    },
+  };
+
+  return graphRepo.writeMrSubgraph({
+    mr: input,
+    author: {
+      id: authorId,
+      identifier: authorUsername,
+      kind: 'user',
+      repoUrl: `${parsed.gitlabUrl}/${parsed.projectPath}`,
+    },
+  });
 }

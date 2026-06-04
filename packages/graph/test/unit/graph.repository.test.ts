@@ -50,7 +50,8 @@ describe('GraphRepository', () => {
     // One UNWIND call per label (2 labels) — not 3 individual MERGEs
     expect(writeRuns.length).toBe(2);
     expect(writeRuns[0]?.cypher).toMatch(/UNWIND \$rows AS row/);
-    expect(writeRuns[0]?.cypher).toMatch(/MERGE \(n:(File|Module) \{id: row\.id\}\)/);
+    // Phase 2 multi-tenant: merge key is now (id, tenantId).
+    expect(writeRuns[0]?.cypher).toMatch(/MERGE \(n:(File|Module) \{id: row\.id, tenantId: \$tenantId\}\)/);
 
     const filesParam = (writeRuns.find((r) => /:File /.test(r.cypher))?.params as { rows: unknown[] }).rows;
     expect(filesParam.length).toBe(2);

@@ -18,7 +18,6 @@
 import { readFile } from 'node:fs/promises';
 import {
   DATABASE_SDK_MAP,
-  HTTP_CLIENT_PACKAGES,
   API_FRAMEWORK_PACKAGES,
   createLogger,
 } from '@ekg/shared';

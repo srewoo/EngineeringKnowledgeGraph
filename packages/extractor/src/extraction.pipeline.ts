@@ -18,11 +18,17 @@ import {
   MultiLanguageParser,
   MultiLangSymbolsParser,
   KafkaMultiLangExtractor,
+  TreeSitterPythonParser,
+  isTreeSitterPythonEnabled,
+  TreeSitterGoParser,
+  isTreeSitterGoEnabled,
+  TreeSitterJavaParser,
+  isTreeSitterJavaEnabled,
 } from '@ekg/parser';
 import type { CodeOwnerRule } from '@ekg/parser';
 import type {
   GraphNode, GraphRelationship, ExtractionResult, EkgConfig, Logger,
-  ParseResult, ParsedHttpCallSite, EdgeConfidence,
+  ParseResult, EdgeConfidence,
 } from '@ekg/shared';
 import { ImportExtractor } from './import.extractor.js';
 import { ServiceDetector } from './service.detector.js';
@@ -50,6 +56,10 @@ export class ExtractionPipeline {
   private readonly metadataScanner: MetadataScanner;
   private readonly tsPool: TypeScriptParserPool;
   private readonly multiParser: MultiLanguageParser;
+  /** Phase A — self-disables if tree-sitter deps aren't installed. */
+  private readonly pythonTreeSitter: TreeSitterPythonParser;
+  private readonly goTreeSitter: TreeSitterGoParser;
+  private readonly javaTreeSitter: TreeSitterJavaParser;
   private readonly multiSymbolsParser: MultiLangSymbolsParser;
   private readonly multiKafkaExtractor: KafkaMultiLangExtractor;
   private readonly importExtractor: ImportExtractor;
@@ -76,6 +86,9 @@ export class ExtractionPipeline {
     this.metadataScanner = new MetadataScanner();
     this.tsPool = new TypeScriptParserPool();
     this.multiParser = new MultiLanguageParser();
+    this.pythonTreeSitter = new TreeSitterPythonParser();
+    this.goTreeSitter = new TreeSitterGoParser();
+    this.javaTreeSitter = new TreeSitterJavaParser();
     this.multiSymbolsParser = new MultiLangSymbolsParser();
     this.multiKafkaExtractor = new KafkaMultiLangExtractor();
     this.importExtractor = new ImportExtractor();
@@ -170,6 +183,20 @@ export class ExtractionPipeline {
           return r ? { kind: 'code' as const, result: r } : undefined;
         }
         if (MultiLanguageParser.handles(ext)) {
+          // Phase A: prefer tree-sitter when enabled per-language AND the
+          // optional dep is loaded; fall back to regex otherwise.
+          if ((ext === '.py' || ext === '.pyi') && isTreeSitterPythonEnabled()) {
+            const ts = await this.pythonTreeSitter.parseFile(file.absolutePath);
+            if (ts) return { kind: 'code' as const, result: ts };
+          }
+          if (ext === '.go' && isTreeSitterGoEnabled()) {
+            const ts = await this.goTreeSitter.parseFile(file.absolutePath);
+            if (ts) return { kind: 'code' as const, result: ts };
+          }
+          if (ext === '.java' && isTreeSitterJavaEnabled()) {
+            const ts = await this.javaTreeSitter.parseFile(file.absolutePath);
+            if (ts) return { kind: 'code' as const, result: ts };
+          }
           const r = await this.multiParser.parseFile(file.absolutePath);
           return r ? { kind: 'code' as const, result: r } : undefined;
         }

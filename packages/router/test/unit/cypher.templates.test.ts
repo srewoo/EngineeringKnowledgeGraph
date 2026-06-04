@@ -33,10 +33,10 @@ describe('extractServiceNames', () => {
 });
 
 describe('cypher templates', () => {
-  it('exposes all five strategy keys', () => {
+  it('exposes all registered strategy keys', () => {
     const all = listTemplates();
     expect(Object.keys(all).sort()).toEqual(
-      ['commits', 'config', 'kafka', 'ownership', 'topology'].sort(),
+      ['commits', 'config', 'coverage', 'kafka', 'mrs', 'ownership', 'runtime', 'topology'].sort(),
     );
   });
 

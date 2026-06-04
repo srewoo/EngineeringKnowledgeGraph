@@ -10,14 +10,18 @@ import { createLogger } from '@ekg/shared';
 import type {
   AdapterCapability,
   AdapterContext,
+  ErrorResult,
   LogResult,
   McpAdapter,
   TimeRange,
 } from '../adapter.interface.js';
+import { mapServiceName, type ServiceMapping } from '../service.mapping.js';
 import { McpStdioClient, splitCommand, tryParseJsonContent } from '../mcp.client.js';
 
-const CAPS: readonly AdapterCapability[] = ['logs'];
+// `errors` is derived from error-level logs — llmPLAN §6.4's loki.get_errors.
+const CAPS: readonly AdapterCapability[] = ['logs', 'errors'];
 const DEFAULT_LOGS_TOOL = 'query_logs';
+const ERROR_LEVELS = new Set(['error', 'err', 'critical', 'crit', 'fatal', 'emerg', 'alert']);
 
 const logger = createLogger({ service: 'adapters.loki' });
 
@@ -73,6 +77,43 @@ export class LokiAdapter implements McpAdapter {
     const parsed = tryParseJsonContent(out.content);
     return normaliseLogs(parsed);
   }
+
+  /**
+   * llmPLAN §6.4 — error-level log intelligence. Builds a LogQL selector for
+   * the service, fetches via `getLogs`, keeps error-severity lines, and
+   * aggregates by message so callers get "top errors" rather than raw lines.
+   * Enables the combined query "why is person-service throwing errors?".
+   */
+  async getErrors(service: string, timeRange: TimeRange): Promise<ErrorResult[]> {
+    const field = (this.context.config['serviceLabel'] as string | undefined) ?? 'app';
+    const mapping = (this.context.config['serviceMapping'] as ServiceMapping | undefined) ?? 'auto';
+    const value = mapServiceName(service, mapping);
+    const query = `{${field}="${value}"} | level=~"(?i)error|err|crit|fatal"`;
+    const logs = await this.getLogs(query, timeRange);
+    const errorLogs = logs.filter((l) => ERROR_LEVELS.has(l.level.toLowerCase()));
+    // If the wrapped server didn't tag levels, trust the LogQL filter above.
+    const effective = errorLogs.length > 0 ? errorLogs : logs;
+    return aggregateErrors(effective, value);
+  }
+}
+
+/** Group error logs by message into ErrorResult[] (count + first/last seen). */
+function aggregateErrors(logs: readonly LogResult[], service: string): ErrorResult[] {
+  const byMessage = new Map<string, { count: number; first: string; last: string }>();
+  for (const l of logs) {
+    const key = l.message.slice(0, 500);
+    const existing = byMessage.get(key);
+    if (!existing) {
+      byMessage.set(key, { count: 1, first: l.timestamp, last: l.timestamp });
+    } else {
+      existing.count += 1;
+      if (l.timestamp < existing.first) existing.first = l.timestamp;
+      if (l.timestamp > existing.last) existing.last = l.timestamp;
+    }
+  }
+  return [...byMessage.entries()]
+    .map(([message, v]) => ({ service, message, count: v.count, firstSeen: v.first, lastSeen: v.last }))
+    .sort((a, b) => b.count - a.count);
 }
 
 export function createLokiAdapter(ctx: AdapterContext): LokiAdapter {

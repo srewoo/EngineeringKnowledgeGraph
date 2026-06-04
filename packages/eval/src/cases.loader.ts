@@ -8,7 +8,9 @@ import type { EvalCase } from './eval.types.js';
 
 const questionClassSchema = z.enum([
   'topology', 'schema', 'code', 'flow', 'ownership',
-  'api', 'config', 'ops', 'history', 'unknown',
+  'api', 'config', 'ops', 'history',
+  'runtime', 'coverage', 'mr', 'semantic',
+  'unknown',
 ]);
 
 const evalCaseSchema = z.object({

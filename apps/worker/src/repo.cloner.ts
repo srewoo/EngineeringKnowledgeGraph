@@ -8,9 +8,9 @@
 
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { access, mkdir, rm } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { join } from 'node:path';
 import { availableParallelism } from 'node:os';
-import { createLogger, DEFAULT_IGNORE_DIRS } from '@ekg/shared';
+import { createLogger } from '@ekg/shared';
 import type { Logger } from '@ekg/shared';
 
 /**

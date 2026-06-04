@@ -5,7 +5,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "ekg-eval": "./dist/cli.js"
+    "ekg-eval": "./dist/cli.js",
+    "ekg-calibration": "./dist/calibration.report.js"
   },
   "scripts": {
     "build": "tsc --build",

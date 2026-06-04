@@ -175,7 +175,7 @@ export class MetadataScanner {
     }
 
     const isAnchored = pattern.startsWith('/');
-    let pat = pattern.replace(/^\/+/, '');
+    const pat = pattern.replace(/^\/+/, '');
 
     // Convert glob to regex
     const regexBody = pat

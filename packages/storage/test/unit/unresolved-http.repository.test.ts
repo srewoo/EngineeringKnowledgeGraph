@@ -56,4 +56,27 @@ describe('UnresolvedHttpRepository', () => {
     repo.upsertMany(rows);
     expect(repo.list('r', 3).length).toBe(3);
   });
+
+  it('count returns totals globally and per repo (Item 3 resolution rate)', () => {
+    repo.upsertMany([
+      { repoUrl: 'r/a', filePath: 'a', line: 1, method: 'GET', urlTemplate: 'u1', clientLibrary: 'c', reason: 'no-match' },
+      { repoUrl: 'r/a', filePath: 'a', line: 2, method: 'POST', urlTemplate: 'u2', clientLibrary: 'c', reason: 'no-match' },
+      { repoUrl: 'r/b', filePath: 'b', line: 1, method: 'GET', urlTemplate: 'u3', clientLibrary: 'c', reason: 'path-only-no-host-match' },
+    ]);
+    expect(repo.count()).toBe(3);
+    expect(repo.count('r/a')).toBe(2);
+    expect(repo.count('r/b')).toBe(1);
+    expect(repo.count('r/missing')).toBe(0);
+  });
+
+  it('countByReason histograms reasons descending', () => {
+    repo.upsertMany([
+      { repoUrl: 'r/a', filePath: 'a', line: 1, method: 'GET', urlTemplate: 'u1', clientLibrary: 'c', reason: 'no-match' },
+      { repoUrl: 'r/a', filePath: 'a', line: 2, method: 'POST', urlTemplate: 'u2', clientLibrary: 'c', reason: 'no-match' },
+      { repoUrl: 'r/a', filePath: 'a', line: 3, method: 'PUT', urlTemplate: 'u3', clientLibrary: 'c', reason: 'path-only-no-host-match' },
+    ]);
+    const byReason = repo.countByReason('r/a');
+    expect(byReason['no-match']).toBe(2);
+    expect(byReason['path-only-no-host-match']).toBe(1);
+  });
 });

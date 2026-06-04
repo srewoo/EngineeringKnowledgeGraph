@@ -28,6 +28,15 @@ export const ekgConfigSchema = z.object({
 
 // -- Environment Schema --
 
+/**
+ * Phase 1 of ADR-006 bridge: deployment-mode + tenancy hooks.
+ *
+ * `deploymentMode` defaults to `local` so existing single-tenant
+ * deployments keep working unchanged. Setting it to `hosted` activates
+ * `validateProductionConfig()` which refuses dev passwords / wildcard
+ * tokens at boot, preventing the "we copied the local docker-compose to
+ * staging" failure mode named in the architect review.
+ */
 export const envConfigSchema = z.object({
   neo4jUri: z.string().default('bolt://localhost:7687'),
   neo4jUser: z.string().default('neo4j'),
@@ -40,6 +49,9 @@ export const envConfigSchema = z.object({
   maxRepoSizeMb: z.coerce.number().positive().default(1024),
   bulkConcurrency: z.coerce.number().int().positive().max(32).default(5),
   ingestTimeoutMs: z.coerce.number().int().positive().min(60_000).default(600_000),
+  // Phase 1 — deployment mode + default tenant
+  deploymentMode: z.enum(['local', 'hosted']).default('local'),
+  tenantId: z.string().min(1).default('local'),
 });
 
 // -- MCP Tool Input Schemas --

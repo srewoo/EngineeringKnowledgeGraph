@@ -43,6 +43,7 @@ export type NodeLabel =
   | 'Method'
   | 'TypeDef'
   | 'Commit'
+  | 'MR'
   | 'ConfigKey'
   | 'SecretRef';
 
@@ -72,6 +73,11 @@ export type RelationshipType =
   | 'CALLS_API'
   | 'OWNED_BY'
   | 'TOUCHED'
+  | 'AUTHORED_MR'
+  | 'MERGED_AS'
+  | 'CHANGES'
+  | 'OBSERVED_CALL'
+  | 'EXPOSES_DATA'
   | 'USES_SECRET';
 
 // -- Base Node --
@@ -339,6 +345,56 @@ export interface CommitNode extends GraphNode {
     message: string;
     authoredAt: string;
     parentShas: readonly string[];
+  }>;
+}
+
+// -- Test Case Node (Phase E) --
+
+/**
+ * Represents a test file (and, in a later slice, an individual test block).
+ * Linked via `TESTS` edges to the code it exercises (today inferred from
+ * imports; later from runtime/coverage signals).
+ */
+export interface TestCaseNode extends GraphNode {
+  readonly label: 'TestCase';
+  readonly properties: Readonly<{
+    repoUrl: string;
+    testFile: string;
+    language: string;
+    /** Best-guess test framework — e.g. `vitest`, `jest`, `pytest`, `junit`. */
+    framework: string;
+  }>;
+}
+
+// -- Merge Request Node (Phase B) --
+
+/**
+ * Represents a GitLab merge request (or GitHub pull request — same shape).
+ * Persisted by the `gitlab_get_mr` tool when called with `persist: true`,
+ * so the agent can ask "what MRs touched this file", "who reviewed this
+ * service last quarter", etc. without re-hitting the GitLab API.
+ *
+ * `id` is the canonical web URL — stable across re-fetches, unique per host.
+ */
+export interface MrNode extends GraphNode {
+  readonly label: 'MR';
+  readonly properties: Readonly<{
+    iid: number;
+    projectPath: string;
+    title: string;
+    state: string;
+    author: string;
+    sourceBranch: string;
+    targetBranch: string;
+    headSha: string | null;
+    labels: readonly string[];
+    webUrl: string;
+    createdAt: string | null;
+    updatedAt: string | null;
+    /** Total files changed — small denormalisation for cheap filtering. */
+    filesChanged: number;
+    /** Lines added + removed — same. */
+    diffSize: number;
   }>;
 }
 

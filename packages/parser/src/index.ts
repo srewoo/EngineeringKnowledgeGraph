@@ -34,3 +34,29 @@ export type {
   GitLogOptions,
   GitFactory,
 } from './git.log.parser.js';
+
+// Phase A — tree-sitter parsers (ADR-007). Optional runtime deps; each
+// self-disables if its grammar isn't installed, with the regex parser as
+// the documented fallback.
+export {
+  TreeSitterPythonParser,
+  parseFromTree as parsePythonFromTree,
+  isTreeSitterPythonEnabled,
+} from './tree-sitter/python.parser.js';
+export type {
+  PythonParseInputs,
+  SyntaxNodeLike,
+  TreeLike,
+} from './tree-sitter/python.parser.js';
+export {
+  TreeSitterGoParser,
+  parseFromTree as parseGoFromTree,
+  isTreeSitterGoEnabled,
+} from './tree-sitter/go.parser.js';
+export type { GoParseInputs } from './tree-sitter/go.parser.js';
+export {
+  TreeSitterJavaParser,
+  parseFromTree as parseJavaFromTree,
+  isTreeSitterJavaEnabled,
+} from './tree-sitter/java.parser.js';
+export type { JavaParseInputs } from './tree-sitter/java.parser.js';

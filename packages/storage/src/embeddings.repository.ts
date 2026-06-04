@@ -185,6 +185,32 @@ export class EmbeddingsRepository {
   close(): void {
     this.db.close();
   }
+
+  /**
+   * Phase D: list rows for a repo (optionally filtered by label) so the
+   * graph mirror can push vectors as node properties. One row per
+   * embeddable item (Doc may have multiple chunks per node — caller
+   * picks one).
+   */
+  listByRepo(repoUrl: string, label?: string): readonly EmbeddingRow[] {
+    const params: unknown[] = [repoUrl];
+    let sql = 'SELECT * FROM embeddings WHERE repo_url = ?';
+    if (label) {
+      sql += ' AND label = ?';
+      params.push(label);
+    }
+    sql += ' ORDER BY id';
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map(mapRow);
+  }
+}
+
+/**
+ * Phase D: helper exported so callers (e.g. the graph vector mirror) can
+ * decode a stored row's vector without re-implementing the buffer cast.
+ */
+export function decodeEmbeddingVector(buf: Buffer): Float32Array {
+  return bufferToFloat32(buf);
 }
 
 function mapRow(row: Record<string, unknown>): EmbeddingRow {

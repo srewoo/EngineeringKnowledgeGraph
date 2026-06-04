@@ -1,5 +1,5 @@
 export { SqliteRepository } from './sqlite.repository.js';
-export { EmbeddingsRepository } from './embeddings.repository.js';
+export { EmbeddingsRepository, decodeEmbeddingVector } from './embeddings.repository.js';
 export type { EmbeddingRow, SimilarityHit } from './embeddings.repository.js';
 export { SearchTextRepository, sanitiseFtsQuery } from './search-text.repository.js';
 export type { SearchTextRow, Bm25Hit, Bm25Options } from './search-text.repository.js';
@@ -11,3 +11,5 @@ export { DlqRepository } from './dlq.repository.js';
 export type { DlqRow, DlqUpsert } from './dlq.repository.js';
 export { UnresolvedHttpRepository } from './unresolved-http.repository.js';
 export type { UnresolvedHttpRow, UnresolvedHttpUpsert } from './unresolved-http.repository.js';
+export { AuditRepository, hashInput } from './audit.repository.js';
+export type { AuditRow, AuditStatus, AuditWriteInput, AuditQueryOptions } from './audit.repository.js';

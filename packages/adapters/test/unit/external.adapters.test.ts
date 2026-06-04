@@ -114,4 +114,32 @@ describe('LokiAdapter', () => {
     expect(logs[1]!.service).toBe('users');
     expect(logs[1]!.message).toBe('ok');
   });
+
+  it('declares the errors capability', () => {
+    const adapter = new LokiAdapter({ context: ctx, command: 'noop' });
+    expect(adapter.capabilities).toContain('logs');
+    expect(adapter.capabilities).toContain('errors');
+  });
+
+  it('getErrors aggregates error-level logs by message, most frequent first', async () => {
+    const adapter = new LokiAdapter({ context: ctx, command: 'noop' });
+    (adapter as unknown as { client: McpStdioClient }).client = stubClient({
+      streams: [
+        { app: 'orders', message: 'NPE in checkout', level: 'error', timestamp: '2026-05-17T10:00:00Z' },
+        { app: 'orders', message: 'NPE in checkout', level: 'error', timestamp: '2026-05-17T10:05:00Z' },
+        { app: 'orders', message: 'timeout calling billing', level: 'error', timestamp: '2026-05-17T10:02:00Z' },
+        { app: 'orders', message: 'served 200', level: 'info', timestamp: '2026-05-17T10:03:00Z' },
+      ],
+    });
+    const errors = await adapter.getErrors('orders', {
+      fromIso: '2026-05-17T09:00:00Z',
+      toIso: '2026-05-17T11:00:00Z',
+    });
+    expect(errors).toHaveLength(2); // info line excluded
+    expect(errors[0]!.message).toBe('NPE in checkout');
+    expect(errors[0]!.count).toBe(2);
+    expect(errors[0]!.firstSeen).toBe('2026-05-17T10:00:00Z');
+    expect(errors[0]!.lastSeen).toBe('2026-05-17T10:05:00Z');
+    expect(errors[0]!.service).toBe('orders');
+  });
 });

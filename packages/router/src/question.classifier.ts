@@ -16,12 +16,24 @@ export type QuestionClass =
   | 'config'
   | 'ops'
   | 'history'
+  | 'runtime'   // Phase C — observed runtime calls, latency, errors
+  | 'coverage'  // Phase E — what tests exercise X
+  | 'mr'        // Phase B — merge requests / pull requests
+  | 'semantic'  // Phase D — "find code similar to" / fuzzy intent
   | 'unknown';
 
 export interface ClassificationResult {
   readonly class: QuestionClass;
   readonly confidence: number;
   readonly signals: readonly string[];
+  /**
+   * Phase F: classes other than `class` that also matched. Populated when
+   * a question is genuinely compound (e.g. "is X slow because of code or
+   * load?" matches both `runtime` and `code`). Empty for clean single-class
+   * questions. The planner uses this to decide whether to dispatch a
+   * composite plan.
+   */
+  readonly secondaryClasses: readonly QuestionClass[];
 }
 
 interface Rule {
@@ -111,6 +123,48 @@ const RULES: readonly Rule[] = [
     ],
   },
   {
+    cls: 'mr',
+    patterns: [
+      /\bmerge request(s)?\b/i,
+      /\bpull request(s)?\b/i,
+      /\b(MR|PR)s?\b/,                  // case-sensitive — common shorthand
+      /\b(reviewed|approved|merged) (this|that|by|the)\b/i,
+      /\bwhich mr\b/i,
+    ],
+  },
+  {
+    cls: 'runtime',
+    patterns: [
+      /\bin prod(uction)?\b/i,
+      /\b(p50|p90|p95|p99) latency\b/i,
+      /\b(actual|actually|observed) calls?\b/i,
+      /\bdatadog\b/i,
+      /\b(trace|tracing|spans?)\b/i,
+      /\b(slow|slowness|hot path)\b/i,
+      /\bruntime\b/i,
+      /\berror rate\b/i,
+    ],
+  },
+  {
+    cls: 'coverage',
+    patterns: [
+      /\b(test|tests) (cover|covering|exercise)/i,
+      /\b(what|which) tests?\b/i,
+      /\bun(tested|covered)\b/i,
+      /\btest coverage\b/i,
+      /\bno tests\b/i,
+    ],
+  },
+  {
+    cls: 'semantic',
+    patterns: [
+      /\bsimilar to\b/i,
+      /\b(find|show me) code (like|similar)\b/i,
+      /\b(semantically|by meaning)\b/i,
+      /\bfuzzy (search|match)\b/i,
+    ],
+  },
+  {
     cls: 'code',
     patterns: [
       /\bwhere (is|do|does).*(implement|defined|calculate|compute)/i,
@@ -131,7 +185,7 @@ interface Hit {
 export function classify(question: string): ClassificationResult {
   const q = question.trim();
   if (q.length === 0) {
-    return { class: 'unknown', confidence: 0, signals: [] };
+    return { class: 'unknown', confidence: 0, signals: [], secondaryClasses: [] };
   }
 
   const hits: Hit[] = [];
@@ -147,7 +201,7 @@ export function classify(question: string): ClassificationResult {
   });
 
   if (hits.length === 0) {
-    return { class: 'unknown', confidence: 0, signals: [] };
+    return { class: 'unknown', confidence: 0, signals: [], secondaryClasses: [] };
   }
 
   // Highest match-count wins; ties resolved by priority (lower index wins).
@@ -156,9 +210,21 @@ export function classify(question: string): ClassificationResult {
   const distinctClasses = new Set(hits.map((h) => h.cls));
   const confidence = distinctClasses.size > 1 ? 0.3 : Math.min(0.6 + 0.1 * (winner.count - 1), 0.95);
 
+  // Secondary classes: distinct classes other than the winner, in their
+  // own order of hit-count desc. Caps at 3 to avoid runaway composite plans.
+  const secondary: QuestionClass[] = [];
+  const seen = new Set<QuestionClass>([winner.cls]);
+  for (const h of hits) {
+    if (seen.has(h.cls)) continue;
+    seen.add(h.cls);
+    secondary.push(h.cls);
+    if (secondary.length >= 3) break;
+  }
+
   return {
     class: winner.cls,
     confidence: Number(confidence.toFixed(2)),
     signals: winner.signals,
+    secondaryClasses: secondary,
   };
 }

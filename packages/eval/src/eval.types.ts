@@ -8,7 +8,10 @@
 
 export type QuestionClass =
   | 'topology' | 'schema' | 'code' | 'flow' | 'ownership'
-  | 'api' | 'config' | 'ops' | 'history' | 'unknown';
+  | 'api' | 'config' | 'ops' | 'history'
+  // Phase F additions
+  | 'runtime' | 'coverage' | 'mr' | 'semantic'
+  | 'unknown';
 
 export interface EvalCase {
   readonly id: string;

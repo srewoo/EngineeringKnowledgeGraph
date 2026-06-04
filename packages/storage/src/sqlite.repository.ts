@@ -25,6 +25,8 @@ export class SqliteRepository {
   }
 
   private initTables(): void {
+    // Step 1 — table DDL only (idempotent CREATE TABLE IF NOT EXISTS).
+    // Tenant_id default 'local' ensures backwards-compat for fresh DBs.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS ingestion_jobs (
         id TEXT PRIMARY KEY,
@@ -37,7 +39,8 @@ export class SqliteRepository {
         files_processed INTEGER NOT NULL DEFAULT 0,
         nodes_created INTEGER NOT NULL DEFAULT 0,
         edges_created INTEGER NOT NULL DEFAULT 0,
-        error TEXT
+        error TEXT,
+        tenant_id TEXT NOT NULL DEFAULT 'local'
       );
 
       CREATE TABLE IF NOT EXISTS file_metadata (
@@ -46,17 +49,9 @@ export class SqliteRepository {
         hash TEXT NOT NULL,
         language TEXT NOT NULL,
         last_parsed_at TEXT NOT NULL,
-        PRIMARY KEY (path, repo_url)
+        tenant_id TEXT NOT NULL DEFAULT 'local',
+        PRIMARY KEY (path, repo_url, tenant_id)
       );
-
-      CREATE INDEX IF NOT EXISTS idx_jobs_repo_url
-        ON ingestion_jobs(repo_url);
-
-      CREATE INDEX IF NOT EXISTS idx_jobs_status
-        ON ingestion_jobs(status);
-
-      CREATE INDEX IF NOT EXISTS idx_files_repo_url
-        ON file_metadata(repo_url);
 
       CREATE TABLE IF NOT EXISTS bulk_jobs (
         id TEXT PRIMARY KEY,
@@ -69,11 +64,9 @@ export class SqliteRepository {
         started_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         completed_at TEXT,
-        payload TEXT NOT NULL DEFAULT '{}'
+        payload TEXT NOT NULL DEFAULT '{}',
+        tenant_id TEXT NOT NULL DEFAULT 'local'
       );
-
-      CREATE INDEX IF NOT EXISTS idx_bulk_jobs_status
-        ON bulk_jobs(status);
 
       CREATE TABLE IF NOT EXISTS dead_letter_repos (
         id TEXT PRIMARY KEY,
@@ -85,15 +78,42 @@ export class SqliteRepository {
         attempts INTEGER NOT NULL,
         first_failed_at TEXT NOT NULL,
         last_failed_at TEXT NOT NULL,
-        resolved_at TEXT
+        resolved_at TEXT,
+        tenant_id TEXT NOT NULL DEFAULT 'local'
       );
-
-      CREATE INDEX IF NOT EXISTS idx_dlq_bulk_job
-        ON dead_letter_repos(bulk_job_id);
-
-      CREATE INDEX IF NOT EXISTS idx_dlq_unresolved
-        ON dead_letter_repos(resolved_at) WHERE resolved_at IS NULL;
     `);
+
+    // Step 2 — Phase 2 idempotent column migration for pre-tenant DBs.
+    // Must run BEFORE any CREATE INDEX that references tenant_id.
+    this.addTenantIdColumnIfMissing('ingestion_jobs');
+    this.addTenantIdColumnIfMissing('file_metadata');
+    this.addTenantIdColumnIfMissing('bulk_jobs');
+    this.addTenantIdColumnIfMissing('dead_letter_repos');
+
+    // Step 3 — indexes (safe because the columns now exist).
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_jobs_repo_url       ON ingestion_jobs(repo_url);
+      CREATE INDEX IF NOT EXISTS idx_jobs_status         ON ingestion_jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_jobs_tenant         ON ingestion_jobs(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_files_repo_url      ON file_metadata(repo_url);
+      CREATE INDEX IF NOT EXISTS idx_files_tenant        ON file_metadata(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_bulk_jobs_status    ON bulk_jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_bulk_jobs_tenant    ON bulk_jobs(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_dlq_bulk_job        ON dead_letter_repos(bulk_job_id);
+      CREATE INDEX IF NOT EXISTS idx_dlq_unresolved      ON dead_letter_repos(resolved_at) WHERE resolved_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_dlq_tenant          ON dead_letter_repos(tenant_id);
+    `);
+  }
+
+  /**
+   * Idempotent migration helper — adds `tenant_id` (default 'local') if a
+   * pre-Phase-2 SQLite file is missing the column. Safe to run on every
+   * boot; cheap pragma check + no-op when column already exists.
+   */
+  private addTenantIdColumnIfMissing(table: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (cols.some((c) => c.name === 'tenant_id')) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'local'`);
   }
 
   // -- Bulk Jobs --
@@ -110,12 +130,14 @@ export class SqliteRepository {
     updatedAt: string;
     completedAt?: string;
     payload: string;
+    /** Phase 2 multi-tenant — defaults to 'local'. */
+    tenantId?: string;
   }): void {
     this.db.prepare(`
       INSERT INTO bulk_jobs
         (id, status, total_discovered, total_ingested, total_failed, total_skipped,
-         current_repo, started_at, updated_at, completed_at, payload)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         current_repo, started_at, updated_at, completed_at, payload, tenant_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (id) DO UPDATE SET
         status = excluded.status,
         total_discovered = excluded.total_discovered,
@@ -126,11 +148,12 @@ export class SqliteRepository {
         updated_at = excluded.updated_at,
         completed_at = COALESCE(excluded.completed_at, bulk_jobs.completed_at),
         payload = excluded.payload
+        -- tenant_id is set at INSERT time only; never updated by upsert.
     `).run(
       payload.id, payload.status,
       payload.totalDiscovered, payload.totalIngested, payload.totalFailed, payload.totalSkipped,
       payload.currentRepo, payload.startedAt, payload.updatedAt,
-      payload.completedAt ?? null, payload.payload,
+      payload.completedAt ?? null, payload.payload, payload.tenantId ?? 'local',
     );
   }
 
@@ -138,13 +161,37 @@ export class SqliteRepository {
     return this.db.prepare('SELECT * FROM bulk_jobs WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   }
 
-  listBulkJobs(): readonly Record<string, unknown>[] {
+  listBulkJobs(tenantId?: string): readonly Record<string, unknown>[] {
+    // Phase 2 multi-tenant: explicit tenantId scopes; omitting it returns
+    // all rows (admin path). Hosted-mode callers always pass the request
+    // tenantId so they never see cross-tenant rows.
+    if (tenantId) {
+      return this.db
+        .prepare('SELECT * FROM bulk_jobs WHERE tenant_id = ? ORDER BY started_at DESC')
+        .all(tenantId) as Record<string, unknown>[];
+    }
     return this.db.prepare('SELECT * FROM bulk_jobs ORDER BY started_at DESC').all() as Record<string, unknown>[];
+  }
+
+  /**
+   * Phase 2 multi-tenant: scoped variant of `getJobsByRepo` that filters
+   * by tenant. Existing `getJobsByRepo` stays as the admin/local path.
+   */
+  getJobsByRepoForTenant(repoUrl: string, tenantId: string): readonly IngestionJob[] {
+    const rows = this.db.prepare(
+      'SELECT * FROM ingestion_jobs WHERE repo_url = ? AND tenant_id = ? ORDER BY started_at DESC, rowid DESC',
+    ).all(repoUrl, tenantId) as Record<string, unknown>[];
+    return rows.map((row) => this.mapRowToJob(row));
   }
 
   // -- Ingestion Jobs --
 
-  createJob(repoUrl: string, branch: string): IngestionJob {
+  /**
+   * Phase 2 multi-tenant: `tenantId` defaults to `'local'` so existing
+   * callers keep working. Hosted-mode callers pass it from the request
+   * context.
+   */
+  createJob(repoUrl: string, branch: string, tenantId: string = 'local'): IngestionJob {
     const job: IngestionJob = {
       id: randomUUID(),
       repoUrl,
@@ -157,11 +204,11 @@ export class SqliteRepository {
     };
 
     this.db.prepare(`
-      INSERT INTO ingestion_jobs (id, repo_url, branch, status, started_at, files_processed, nodes_created, edges_created)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(job.id, job.repoUrl, job.branch, job.status, job.startedAt, 0, 0, 0);
+      INSERT INTO ingestion_jobs (id, repo_url, branch, status, started_at, files_processed, nodes_created, edges_created, tenant_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(job.id, job.repoUrl, job.branch, job.status, job.startedAt, 0, 0, 0, tenantId);
 
-    this.logger.info({ jobId: job.id, repoUrl }, 'Ingestion job created');
+    this.logger.info({ jobId: job.id, repoUrl, tenantId }, 'Ingestion job created');
     return job;
   }
 
@@ -224,11 +271,13 @@ export class SqliteRepository {
 
   // -- File Metadata --
 
-  upsertFileMetadata(metadata: FileMetadata): void {
+  upsertFileMetadata(metadata: FileMetadata, tenantId: string = 'local'): void {
+    // Phase 2: PRIMARY KEY is now (path, repo_url, tenant_id) — the
+    // ON CONFLICT clause must match that exact composite key.
     this.db.prepare(`
-      INSERT INTO file_metadata (path, repo_url, hash, language, last_parsed_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT (path, repo_url) DO UPDATE SET
+      INSERT INTO file_metadata (path, repo_url, hash, language, last_parsed_at, tenant_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (path, repo_url, tenant_id) DO UPDATE SET
         hash = excluded.hash,
         language = excluded.language,
         last_parsed_at = excluded.last_parsed_at
@@ -238,6 +287,7 @@ export class SqliteRepository {
       metadata.hash,
       metadata.language,
       metadata.lastParsedAt,
+      tenantId,
     );
   }
 

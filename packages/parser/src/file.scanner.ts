@@ -6,7 +6,7 @@
  */
 
 import { readdir, stat } from 'node:fs/promises';
-import { join, extname, relative, basename } from 'node:path';
+import { join, extname, relative } from 'node:path';
 import { createLogger } from '@ekg/shared';
 import {
   DEFAULT_IGNORE_DIRS,

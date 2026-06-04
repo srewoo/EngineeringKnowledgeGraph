@@ -1,0 +1,22 @@
+[
+  { "id": "fx-topo-1", "question": "What services depend on billing-core?", "expectedClass": "topology", "goldCitations": ["svc:billing-core", "svc:payment-service", "svc:gateway"] },
+  { "id": "fx-topo-2", "question": "What does payment-service depend on?", "expectedClass": "topology", "goldCitations": ["svc:payment-service", "svc:billing-core", "db:payments-pg"] },
+
+  { "id": "fx-own-1", "question": "Who owns billing-core?", "expectedClass": "ownership", "goldCitations": ["svc:billing-core", "owner:billing-team"] },
+  { "id": "fx-own-2", "question": "Who owns payment-service?", "expectedClass": "ownership", "goldCitations": ["svc:payment-service", "owner:payments-team"] },
+
+  { "id": "fx-api-1", "question": "Which API endpoints does payment-service expose?", "expectedClass": "api", "goldCitations": ["svc:payment-service", "api:POST /v1/charges", "api:POST /v1/refunds"] },
+  { "id": "fx-api-2", "question": "Which API endpoints does billing-core expose?", "expectedClass": "api", "goldCitations": ["svc:billing-core", "api:GET /v1/invoices"] },
+
+  { "id": "fx-schema-1", "question": "Which column marks an invoice void?", "expectedClass": "schema", "goldCitations": ["Table:Invoice", "Column:Invoice.is_void"] },
+  { "id": "fx-schema-2", "question": "Which column records that a charge was captured?", "expectedClass": "schema", "goldCitations": ["Column:Charge.captured"] },
+
+  { "id": "fx-cfg-1", "question": "Which env var is STRIPE_API_KEY and where is it read?", "expectedClass": "config", "goldCitations": ["cfg:STRIPE_API_KEY"] },
+  { "id": "fx-cfg-2", "question": "Which env var is LEDGER_DB_URL?", "expectedClass": "config", "goldCitations": ["cfg:LEDGER_DB_URL"] },
+
+  { "id": "fx-mr-1", "question": "Show me merge requests for billing-core", "expectedClass": "mr", "goldCitations": ["mr:billing-core/!42"] },
+  { "id": "fx-mr-2", "question": "Which merge requests did alice author?", "expectedClass": "mr", "goldCitations": ["mr:billing-core/!42"] },
+
+  { "id": "fx-cov-1", "question": "What tests cover billing-core?", "expectedClass": "coverage", "goldCitations": ["svc:billing-core", "test:billing-core/invoice.test.ts"] },
+  { "id": "fx-cov-2", "question": "Which tests exercise payment-service?", "expectedClass": "coverage", "goldCitations": ["svc:payment-service", "test:payment-service/charge.test.ts"] }
+]

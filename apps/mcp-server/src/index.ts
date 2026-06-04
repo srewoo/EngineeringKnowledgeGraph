@@ -17,7 +17,7 @@ const envPath = resolve(__dirname, '..', '..', '..', '.env');
 dotenv.config({ path: envPath });
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createLogger, initFileLogging, envConfigSchema } from '@ekg/shared';
+import { createLogger, initFileLogging, envConfigSchema, validateProductionConfig } from '@ekg/shared';
 import { Neo4jClient, GraphQueries } from '@ekg/graph';
 import { SqliteRepository, UnresolvedHttpRepository } from '@ekg/storage';
 import { IngestionService, BulkIngestionService, ServiceResolver, EmbeddingsService, SearchIndexService } from '@ekg/worker';
@@ -47,7 +47,27 @@ async function main(): Promise<void> {
     maxRepoSizeMb: process.env['MAX_REPO_SIZE_MB'],
     bulkConcurrency: process.env['BULK_CONCURRENCY'],
     ingestTimeoutMs: process.env['INGEST_TIMEOUT_MS'],
+    deploymentMode: process.env['EKG_DEPLOYMENT_MODE'],
+    tenantId: process.env['EKG_TENANT_ID'],
   });
+
+  // Phase 1 of ADR-006 bridge: refuse unsafe configs in hosted mode at boot.
+  const guard = validateProductionConfig({
+    deploymentMode: env.deploymentMode,
+    neo4jUri: env.neo4jUri,
+    neo4jPassword: env.neo4jPassword,
+    tenantId: env.tenantId,
+  });
+  if (!guard.ok) {
+    for (const v of guard.violations) logger.error({ rule: v.rule }, v.message);
+    logger.error({ count: guard.violations.length }, 'Refusing to start: production guard violations');
+    process.exit(1);
+  }
+  if (env.deploymentMode === 'hosted') {
+    logger.info({ tenantId: env.tenantId }, 'Booting in hosted mode — production guard passed');
+  } else {
+    logger.info('Booting in local mode (single-tenant, no auth)');
+  }
 
   // Ensure data directory exists and init file logging
   mkdirSync(env.dataDir, { recursive: true });
@@ -151,6 +171,9 @@ async function main(): Promise<void> {
     searchTextRepo,
     ...(adapterRegistry ? { adapterRegistry } : {}),
     ...(runtimeRegistry ? { runtimeRegistry } : {}),
+    // Phase 2 multi-tenant — passed through to the audit/tenant middleware.
+    deploymentMode: env.deploymentMode,
+    defaultTenantId: env.tenantId,
     gitlabConfig: {
       gitlabUrl: env.gitlabUrl,
       token: env.gitToken ?? '',

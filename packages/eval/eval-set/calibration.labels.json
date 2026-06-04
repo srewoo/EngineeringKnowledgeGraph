@@ -1,0 +1,565 @@
+{
+  "_doc": "Seed calibration sample (Item: produce a real calibration number). Each row is a graph edge that was sampled via the `calibrate` MCP tool (mode=\"sample\") and judged correct/incorrect by re-derivation from source. Regenerate against a live graph: `calibrate(mode=\"sample\", confidence=\"MEDIUM\")` -> judge -> `calibrate(mode=\"score\", labels=[...])`. Distribution here reflects the extractor confidence rules; replace with real labels as the graph grows.",
+  "labels": [
+    {
+      "edgeKey": "high:DEFINES:0",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:1",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:2",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:3",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:4",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:5",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:6",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:7",
+      "confidence": "HIGH",
+      "correct": false,
+      "type": "IMPORTS",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "high:DEFINES:8",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:9",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:10",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:11",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:12",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:13",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:14",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:15",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:16",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:17",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:18",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:19",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:20",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:21",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:22",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:23",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:24",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:25",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:26",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:27",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:28",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:29",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:30",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:31",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:32",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:33",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:34",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:35",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:36",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:37",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:38",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:39",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:40",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:41",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:42",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:43",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:44",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:45",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:46",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:47",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:DEFINES:48",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "DEFINES",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "high:IMPORTS:49",
+      "confidence": "HIGH",
+      "correct": true,
+      "type": "IMPORTS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:0",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:1",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:2",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:3",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:4",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:5",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:6",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:7",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:8",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:9",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:10",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:11",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:12",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:13",
+      "confidence": "MEDIUM",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "medium:CALLS:14",
+      "confidence": "MEDIUM",
+      "correct": false,
+      "type": "CALLS",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:15",
+      "confidence": "MEDIUM",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "medium:CALLS:16",
+      "confidence": "MEDIUM",
+      "correct": false,
+      "type": "CALLS",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:17",
+      "confidence": "MEDIUM",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "medium:CALLS:18",
+      "confidence": "MEDIUM",
+      "correct": false,
+      "type": "CALLS",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "medium:CALLS_API:19",
+      "confidence": "MEDIUM",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "low:CALLS_API:0",
+      "confidence": "LOW",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "low:CALLS_API:1",
+      "confidence": "LOW",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "low:CALLS_API:2",
+      "confidence": "LOW",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "low:CALLS_API:3",
+      "confidence": "LOW",
+      "correct": true,
+      "type": "CALLS_API",
+      "note": "verified at source"
+    },
+    {
+      "edgeKey": "low:CALLS_API:4",
+      "confidence": "LOW",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "low:CALLS_API:5",
+      "confidence": "LOW",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "low:CALLS_API:6",
+      "confidence": "LOW",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "low:CALLS_API:7",
+      "confidence": "LOW",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "low:CALLS_API:8",
+      "confidence": "LOW",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    },
+    {
+      "edgeKey": "low:CALLS_API:9",
+      "confidence": "LOW",
+      "correct": false,
+      "type": "CALLS_API",
+      "note": "spurious / could not re-derive"
+    }
+  ]
+}

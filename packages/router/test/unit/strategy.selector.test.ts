@@ -32,4 +32,18 @@ describe('selectStrategy', () => {
   it('unknown → broad hybrid (no label)', () => {
     expect(selectStrategy('unknown')).toEqual({ kind: 'hybrid' });
   });
+
+  // -- Phase F additions --
+  it('runtime → graph-only/runtime', () => {
+    expect(selectStrategy('runtime')).toEqual({ kind: 'graph-only', cypher: 'runtime' });
+  });
+  it('coverage → graph-only/coverage', () => {
+    expect(selectStrategy('coverage')).toEqual({ kind: 'graph-only', cypher: 'coverage' });
+  });
+  it('mr → graph-only/mrs', () => {
+    expect(selectStrategy('mr')).toEqual({ kind: 'graph-only', cypher: 'mrs' });
+  });
+  it('semantic → broad hybrid (no label)', () => {
+    expect(selectStrategy('semantic')).toEqual({ kind: 'hybrid' });
+  });
 });

@@ -1,0 +1,11 @@
+{
+  "runId": "baseline-2026-06-04-classifier-only",
+  "startedAt": "2026-06-04T00:00:00.000Z",
+  "completedAt": "2026-06-04T00:00:00.000Z",
+  "cases": 191,
+  "passed": 0,
+  "classifierAcc": 0.7958,
+  "citationPrecision": 0,
+  "citationRecall": 0,
+  "faithfulness": 0
+}

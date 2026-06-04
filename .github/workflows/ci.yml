@@ -1,0 +1,64 @@
+name: CI
+
+# Quality gate for every change. The eval gate (job `eval-gate`) is the
+# merge-blocking signal that closes the "an extractor/router change silently
+# regressed answer quality" gap: it runs the deterministic classifier over the
+# full eval set and fails the build if routing accuracy drops below the floor
+# or regresses past the frozen baseline (packages/eval/eval-set/baseline.json).
+#
+# To move the bar intentionally, run `npm run eval:gate:update` and commit the
+# updated baseline.json in the same PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: typecheck · lint · unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  eval-gate:
+    name: eval gate (regression block)
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Build only what the eval CLI needs (shared → router → eval).
+      - run: npm run build -w @ekg/shared -w @ekg/router -w @ekg/eval
+      # Classifier-only gate: deterministic, no Neo4j/LLM required.
+      # Non-zero exit on floor breach or baseline regression blocks the merge.
+      - run: node packages/eval/dist/cli.js gate
+      # Retrieval gate: FixtureAgent over a committed synthetic graph, so
+      # citation recall/precision is enforced (not dormant) — still no infra.
+      - run: >
+          node packages/eval/dist/cli.js gate
+          --cases packages/eval/eval-set/fixture.cases.json
+          --fixture packages/eval/eval-set/fixture.graph.json
+          --baseline packages/eval/eval-set/fixture.baseline.json
+          --min-recall 0.9

@@ -1,0 +1,58 @@
+{
+  "_doc": "Synthetic graph fixture for end-to-end retrieval gating (Item: activate citation/recall gating). Node ids here are the gold citations in fixture.cases.json, so FixtureAgent retrieval is scored on real precision/recall with zero infra. Keep node names single-token (matchable by the question text) and edges shaped so each class's strategy returns its gold set.",
+  "nodes": [
+    { "id": "svc:payment-service", "label": "Service", "name": "payment-service", "properties": {} },
+    { "id": "svc:billing-core", "label": "Service", "name": "billing-core", "properties": {} },
+    { "id": "svc:gateway", "label": "Service", "name": "gateway", "properties": {} },
+    { "id": "svc:ledger-service", "label": "Service", "name": "ledger-service", "properties": {} },
+    { "id": "svc:notification-service", "label": "Service", "name": "notification-service", "properties": {} },
+
+    { "id": "api:POST /v1/charges", "label": "API", "name": "POST /v1/charges", "properties": { "method": "POST", "path": "/v1/charges" } },
+    { "id": "api:GET /v1/invoices", "label": "API", "name": "GET /v1/invoices", "properties": { "method": "GET", "path": "/v1/invoices" } },
+    { "id": "api:POST /v1/refunds", "label": "API", "name": "POST /v1/refunds", "properties": { "method": "POST", "path": "/v1/refunds" } },
+
+    { "id": "db:payments-pg", "label": "Database", "name": "payments-pg", "properties": { "engine": "postgres" } },
+
+    { "id": "Table:Invoice", "label": "Table", "name": "Invoice", "properties": { "filePath": "billing-core/schema.prisma" } },
+    { "id": "Column:Invoice.is_void", "label": "Column", "name": "is_void", "properties": { "tableId": "Table:Invoice" } },
+    { "id": "Table:Charge", "label": "Table", "name": "Charge", "properties": { "filePath": "payment-service/schema.prisma" } },
+    { "id": "Column:Charge.captured", "label": "Column", "name": "captured", "properties": { "tableId": "Table:Charge" } },
+
+    { "id": "owner:billing-team", "label": "Team", "name": "billing-team", "properties": {} },
+    { "id": "owner:payments-team", "label": "Team", "name": "payments-team", "properties": {} },
+
+    { "id": "cfg:STRIPE_API_KEY", "label": "ConfigKey", "name": "STRIPE_API_KEY", "properties": { "key": "STRIPE_API_KEY" } },
+    { "id": "cfg:LEDGER_DB_URL", "label": "ConfigKey", "name": "LEDGER_DB_URL", "properties": { "key": "LEDGER_DB_URL" } },
+
+    { "id": "topic:charges.completed", "label": "Topic", "name": "charges.completed", "properties": {} },
+    { "id": "topic:invoices.issued", "label": "Topic", "name": "invoices.issued", "properties": {} },
+
+    { "id": "test:billing-core/invoice.test.ts", "label": "TestCase", "name": "invoice.test.ts", "properties": { "testFile": "billing-core/invoice.test.ts" } },
+    { "id": "test:payment-service/charge.test.ts", "label": "TestCase", "name": "charge.test.ts", "properties": { "testFile": "payment-service/charge.test.ts" } },
+
+    { "id": "mr:billing-core/!42", "label": "MR", "name": "billing-core/!42", "properties": { "projectPath": "billing-core", "author": "alice", "title": "Add invoice approval flow" } },
+    { "id": "mr:payment-service/!17", "label": "MR", "name": "payment-service/!17", "properties": { "projectPath": "payment-service", "author": "bob", "title": "Refund idempotency" } }
+  ],
+  "edges": [
+    { "type": "DEPENDS_ON", "sourceId": "svc:gateway", "targetId": "svc:payment-service" },
+    { "type": "DEPENDS_ON", "sourceId": "svc:payment-service", "targetId": "svc:billing-core" },
+    { "type": "DEPENDS_ON", "sourceId": "svc:billing-core", "targetId": "svc:ledger-service" },
+    { "type": "USES", "sourceId": "svc:payment-service", "targetId": "db:payments-pg" },
+
+    { "type": "EXPOSES", "sourceId": "svc:payment-service", "targetId": "api:POST /v1/charges" },
+    { "type": "EXPOSES", "sourceId": "svc:payment-service", "targetId": "api:POST /v1/refunds" },
+    { "type": "EXPOSES", "sourceId": "svc:billing-core", "targetId": "api:GET /v1/invoices" },
+
+    { "type": "OWNS", "sourceId": "owner:billing-team", "targetId": "svc:billing-core" },
+    { "type": "OWNS", "sourceId": "owner:payments-team", "targetId": "svc:payment-service" },
+
+    { "type": "READS_CONFIG", "sourceId": "svc:payment-service", "targetId": "cfg:STRIPE_API_KEY" },
+    { "type": "READS_CONFIG", "sourceId": "svc:ledger-service", "targetId": "cfg:LEDGER_DB_URL" },
+
+    { "type": "PRODUCES", "sourceId": "svc:payment-service", "targetId": "topic:charges.completed" },
+    { "type": "PRODUCES", "sourceId": "svc:billing-core", "targetId": "topic:invoices.issued" },
+
+    { "type": "TESTS", "sourceId": "test:billing-core/invoice.test.ts", "targetId": "svc:billing-core" },
+    { "type": "TESTS", "sourceId": "test:payment-service/charge.test.ts", "targetId": "svc:payment-service" }
+  ]
+}

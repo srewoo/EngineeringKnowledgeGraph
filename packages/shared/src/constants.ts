@@ -16,7 +16,7 @@ export const NODE_LABELS: readonly NodeLabel[] = [
   'Owner', 'Team', 'Doc',
   'Table', 'Column', 'Migration',
   'Function', 'Class', 'Method', 'TypeDef',
-  'Commit',
+  'Commit', 'MR',
   'ConfigKey', 'SecretRef',
 ] as const;
 
@@ -30,6 +30,9 @@ export const RELATIONSHIP_TYPES: readonly RelationshipType[] = [
   'DEFINES', 'EXTENDS',
   'PRODUCES', 'CONSUMES', 'CALLS_API',
   'OWNED_BY', 'TOUCHED',
+  'AUTHORED_MR', 'MERGED_AS', 'CHANGES',
+  'OBSERVED_CALL',
+  'EXPOSES_DATA',
   'USES_SECRET',
 ] as const;
 

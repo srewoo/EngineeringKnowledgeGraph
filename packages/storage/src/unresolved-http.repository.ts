@@ -104,6 +104,28 @@ export class UnresolvedHttpRepository {
     ).run(repoUrl);
     return result.changes ?? 0;
   }
+
+  /** Total unresolved HTTP call sites, optionally scoped to one repo. */
+  count(repoUrl?: string): number {
+    const row = repoUrl
+      ? this.db.prepare('SELECT COUNT(*) AS n FROM unresolved_http_calls WHERE repo_url = ?').get(repoUrl) as { n: number }
+      : this.db.prepare('SELECT COUNT(*) AS n FROM unresolved_http_calls').get() as { n: number };
+    return row.n;
+  }
+
+  /**
+   * Unresolved counts grouped by `reason`, descending — the histogram an
+   * engineer reads to decide whether to add `serviceHosts` hints (host
+   * misses) vs. accept template-only call sites that can't be resolved.
+   */
+  countByReason(repoUrl?: string): Record<string, number> {
+    const rows = repoUrl
+      ? this.db.prepare('SELECT reason, COUNT(*) AS n FROM unresolved_http_calls WHERE repo_url = ? GROUP BY reason ORDER BY n DESC').all(repoUrl) as { reason: string; n: number }[]
+      : this.db.prepare('SELECT reason, COUNT(*) AS n FROM unresolved_http_calls GROUP BY reason ORDER BY n DESC').all() as { reason: string; n: number }[];
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.reason] = r.n;
+    return out;
+  }
 }
 
 function mapRow(row: Record<string, unknown>): UnresolvedHttpRow {

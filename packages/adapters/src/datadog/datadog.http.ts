@@ -40,7 +40,7 @@ export async function datadogFetch(
   const url = buildUrl(creds.site, req.path, req.query);
   const fetchImpl = req.fetchImpl ?? fetch;
   let attempt = 0;
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const controller = new AbortController();
     const timeoutMs = req.timeoutMs ?? 5_000;

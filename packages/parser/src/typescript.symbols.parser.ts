@@ -20,7 +20,6 @@ import {
   SyntaxKind,
   type SourceFile,
   type FunctionDeclaration,
-  type ClassDeclaration,
   type MethodDeclaration,
   type ArrowFunction,
   type FunctionExpression,

@@ -22,8 +22,6 @@ interface HistogramValue {
   p99: number;
 }
 
-type MetricValue = CounterValue | GaugeValue | HistogramValue;
-
 export class MetricsRegistry {
   private readonly counters = new Map<string, number>();
   private readonly gauges = new Map<string, number>();

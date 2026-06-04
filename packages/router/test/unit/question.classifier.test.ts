@@ -78,4 +78,31 @@ describe('classify', () => {
     const r = classify('Who owns the billing module?');
     expect(r.confidence).toBeGreaterThanOrEqual(0.6);
   });
+
+  // -- Phase F additions --
+  describe('Phase F new classes', () => {
+    it('classifies prod / runtime questions as runtime', () => {
+      expect(classify('Which services actually call payment-service in prod?').class).toBe('runtime');
+      expect(classify('What is the p99 latency of checkout-service?').class).toBe('runtime');
+      expect(classify('Show me datadog traces for auth-service').class).toBe('runtime');
+    });
+
+    it('classifies test-coverage questions as coverage', () => {
+      expect(classify('Which tests cover src/foo.ts?').class).toBe('coverage');
+      expect(classify('What is untested in billing-core?').class).toBe('coverage');
+      expect(classify('Find code with no tests in coaching-service').class).toBe('coverage');
+    });
+
+    it('classifies merge-request questions as mr', () => {
+      expect(classify('Show me merge requests for billing').class).toBe('mr');
+      expect(classify('Latest pull requests against gateway').class).toBe('mr');
+      expect(classify('Which MRs has alice authored?').class).toBe('mr');
+    });
+
+    it('classifies semantic / fuzzy intent as semantic', () => {
+      expect(classify('Find code similar to retrying with exponential backoff').class).toBe('semantic');
+      expect(classify('Show me functions semantically like JWT validation').class).toBe('semantic');
+      expect(classify('Fuzzy search: input sanitization').class).toBe('semantic');
+    });
+  });
 });

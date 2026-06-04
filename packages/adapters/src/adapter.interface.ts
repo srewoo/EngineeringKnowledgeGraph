@@ -42,6 +42,22 @@ export interface TraceResult {
   readonly status: 'ok' | 'error';
 }
 
+/**
+ * Service-to-service call edge observed in runtime traces. Phase C: the
+ * substrate for materialising `OBSERVED_CALL` edges in the graph.
+ *
+ * `callCount` / `errorCount` are optional — some adapters expose topology
+ * only (e.g. a service dependency list) without aggregated counts. When
+ * unknown, leave undefined rather than imputing zero.
+ */
+export interface ServiceDependencyEdge {
+  readonly caller: string;
+  readonly callee: string;
+  readonly callCount?: number;
+  readonly errorCount?: number;
+  readonly p99LatencyMs?: number;
+}
+
 export interface ErrorResult {
   readonly service: string;
   readonly message: string;
@@ -107,4 +123,16 @@ export interface McpAdapter {
   searchTickets?(query: string): Promise<TicketResult[]>;
   getAlarms?(timeRange: TimeRange): Promise<AlarmResult[]>;
   getTrace?(traceId: string): Promise<TraceResult | undefined>;
+  /**
+   * Phase C: return observed service-to-service call edges for the time range.
+   * Adapters that cannot answer this leave the method undefined; callers use
+   * `typeof adapter.getServiceDependencies === 'function'` as a capability probe.
+   */
+  getServiceDependencies?(timeRange: TimeRange): Promise<ServiceDependencyEdge[]>;
+  /**
+   * Phase C v2 (runtime fusion): return enriched dependency edges with
+   * `callCount` / `errorCount` / `p99LatencyMs` populated. Adapters that
+   * only have topology (no aggregation) leave this undefined.
+   */
+  getServiceDependencyMetrics?(timeRange: TimeRange): Promise<ServiceDependencyEdge[]>;
 }

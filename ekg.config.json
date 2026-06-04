@@ -1,61 +1,132 @@
 {
   "$schema": "./packages/shared/ekg-config.schema.json",
+
+  "_comment_repos": "Optional. When the MCP tool is given a repo URL it ingests directly. This list is only used by the legacy CLI / future declarative ingest. Leave empty for pure MCP-driven workflows.",
   "repos": [
     {
       "url": "https://github.com/example/user-service",
       "branch": "main",
       "serviceMappings": {
-        "src/": "UserService"
+        "src/": "UserService",
+        "apps/api/": "UserApi",
+        "apps/worker/": "UserWorker"
       }
     }
   ],
+
+  "_comment_ignoreDirs": "Directories skipped by FileScanner regardless of file type. Lockfiles, binaries, and >2MB files are skipped automatically — these are coarser filters.",
   "ignoreDirs": [
     "node_modules",
     "dist",
     "build",
     ".git",
+    ".next",
+    ".nuxt",
     "coverage",
     "vendor",
     "__tests__",
-    "test"
+    "test",
+    "tests",
+    "__pycache__",
+    ".gradle",
+    "target",
+    ".terraform",
+    ".idea",
+    ".vscode"
   ],
-  "supportedExtensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+
+  "_comment_supportedExtensions": "Override the default extension set. Comment out to use DEFAULT_SUPPORTED_EXTENSIONS from packages/shared/src/constants.ts (covers ~25 langs + .sql/.proto/.graphql/.md).",
+  "supportedExtensions": [
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".java", ".kt", ".scala",
+    ".go",
+    ".py", ".pyi",
+    ".rs", ".rb", ".php", ".cs", ".swift",
+    ".c", ".h", ".cpp", ".hpp",
+    ".graphql", ".gql", ".proto", ".thrift", ".prisma",
+    ".sql", ".ddl",
+    ".md", ".mdx", ".rst", ".adoc",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".env"
+  ],
+
+  "_comment_mcpAdapters": "External MCP adapters that fan out from the agent. Each adapter is OFF by default. Set `enabled: true` AND populate the matching env var(s) in .env to activate. ${VAR} values are pulled from process.env at startup.",
   "mcpAdapters": [
     {
+      "_doc": "Datadog — direct REST adapter (no spawned MCP server). Capabilities: per-service metrics (traces.errors, hits, duration.p99), error stack-trace search via APM spans, monitor/alert listing.",
       "id": "datadog",
       "enabled": false,
       "transport": "stdio",
-      "env": { "DD_API_KEY": "${DD_API_KEY}", "DD_APP_KEY": "${DD_APP_KEY}", "DD_SITE": "${DD_SITE}" },
+      "env": {
+        "DD_API_KEY": "${DD_API_KEY}",
+        "DD_APP_KEY": "${DD_APP_KEY}",
+        "DD_SITE": "${DD_SITE}"
+      },
       "serviceMapping": "auto",
       "capabilities": ["metrics", "traces", "errors", "alarms"],
       "priority": 10
     },
+
     {
+      "_doc": "Atlassian (Jira + Confluence) — spawns an external MCP server via stdio. The default is the community @aashari/mcp-server-atlassian-jira; replace with whatever your team has standardised on. Tools called: confluence_search, jira_search.",
       "id": "atlassian",
       "enabled": false,
       "transport": "stdio",
-      "env": { "ATLASSIAN_TOKEN": "${ATLASSIAN_TOKEN}" },
+      "command": "npx",
+      "args": ["-y", "@aashari/mcp-server-atlassian-jira"],
+      "env": {
+        "ATLASSIAN_TOKEN": "${ATLASSIAN_TOKEN}",
+        "ATLASSIAN_BASE_URL": "${ATLASSIAN_BASE_URL}",
+        "ATLASSIAN_EMAIL": "${ATLASSIAN_EMAIL}"
+      },
       "serviceMapping": "auto",
       "capabilities": ["docs", "tickets"],
-      "priority": 5
+      "priority": 5,
+      "config": {
+        "_doc": "Override the upstream tool names if you swap in a different MCP server.",
+        "tools": {
+          "searchDocs": "confluence_search",
+          "searchTickets": "jira_search"
+        }
+      }
     },
+
     {
+      "_doc": "Mixpanel — wrapped MCP server for product/usage data. Tool called: query_event_counts. Override config.tools.getUsage if your server names it differently.",
       "id": "mixpanel",
       "enabled": false,
       "transport": "stdio",
-      "env": { "MIXPANEL_TOKEN": "${MIXPANEL_TOKEN}" },
+      "command": "npx",
+      "args": ["-y", "@mixpanel/mcp-server"],
+      "env": {
+        "MIXPANEL_TOKEN": "${MIXPANEL_TOKEN}",
+        "MIXPANEL_PROJECT_ID": "${MIXPANEL_PROJECT_ID}"
+      },
       "serviceMapping": "auto",
       "capabilities": ["usage"],
-      "priority": 5
+      "priority": 5,
+      "config": {
+        "tools": { "getUsage": "query_event_counts" }
+      }
     },
+
     {
+      "_doc": "Grafana Loki — wrapped MCP server for log queries (LogQL). Tool called: query_logs. Service-name → label mapping below maps EKG `Service.name` to the Loki `app` label.",
       "id": "loki",
       "enabled": false,
-      "transport": "http",
-      "env": { "LOKI_URL": "${LOKI_URL}" },
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@grafana/mcp-loki"],
+      "env": {
+        "LOKI_URL": "${LOKI_URL}",
+        "LOKI_USER": "${LOKI_USER}",
+        "LOKI_PASSWORD": "${LOKI_PASSWORD}"
+      },
       "serviceMapping": { "field": "app", "pattern": "{service}" },
-      "capabilities": ["logs"],
-      "priority": 5
+      "capabilities": ["logs", "errors"],
+      "priority": 5,
+      "config": {
+        "tools": { "getLogs": "query_logs" }
+      }
     }
   ]
 }

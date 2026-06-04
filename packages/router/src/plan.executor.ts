@@ -8,7 +8,7 @@ import { createLogger, type Logger } from '@ekg/shared';
 import type { HybridSearch, HybridResult } from '@ekg/search';
 import type { Neo4jClient } from '@ekg/graph';
 import type { QuestionClass } from './question.classifier.js';
-import type { RetrievalStrategy, CypherTemplateKey } from './strategy.selector.js';
+import type { RetrievalStrategy, CypherTemplateKey, CompositeStrategy } from './strategy.selector.js';
 import { extractServiceNames, getTemplate } from './cypher.templates.js';
 
 export interface PlanResult {
@@ -139,7 +139,7 @@ async function runGraph(
   const params: Record<string, unknown> = {
     serviceNames: serviceNames.map((s) => s.toLowerCase()),
   };
-  if (key === 'commits') {
+  if (key === 'commits' || key === 'coverage') {
     params['entity'] = extractFilePathHint(question);
   }
   if (key === 'config') {
@@ -147,6 +147,16 @@ async function runGraph(
     // the ConfigKey lookup. Empty string lets the template fall back to the
     // service-name path.
     params['entity'] = extractConfigEntityHint(question);
+  }
+  if (key === 'mrs') {
+    // MRs can be addressed by projectPath substring, author username, or
+    // title keyword. Fall through to free-form: pick the first non-stopword
+    // token if no path-like hint is present.
+    const path = extractFilePathHint(question);
+    params['entity'] = path || extractFreeformEntity(question);
+  }
+  if (key === 'runtime') {
+    // No entity needed — runtime template keys off serviceNames alone.
   }
   return runGraphRaw(tpl.cypher, params, deps, logger);
 }
@@ -171,6 +181,27 @@ function extractConfigEntityHint(question: string): string {
   const env = question.match(/\b[A-Z][A-Z0-9_]{3,}\b/);
   if (env) return env[0];
   return extractFilePathHint(question);
+}
+
+/**
+ * Pull the first plausible identifier from a free-form question — e.g.
+ * the username in "MRs by alice", or the keyword in "MRs about billing".
+ * Drops common stopwords + question words.
+ */
+const FREEFORM_STOPWORDS = new Set([
+  'mrs', 'mr', 'pr', 'prs', 'merge', 'pull', 'request', 'requests',
+  'by', 'from', 'about', 'on', 'in', 'the', 'a', 'an', 'this', 'that',
+  'who', 'what', 'which', 'when', 'where', 'show', 'list', 'find',
+  'authored', 'reviewed', 'approved', 'merged',
+]);
+function extractFreeformEntity(question: string): string {
+  for (const tok of question.toLowerCase().split(/\s+/)) {
+    const clean = tok.replace(/[^a-z0-9_-]/g, '');
+    if (clean.length < 3) continue;
+    if (FREEFORM_STOPWORDS.has(clean)) continue;
+    return clean;
+  }
+  return '';
 }
 
 async function runGraphRaw(
@@ -225,6 +256,114 @@ function firstWord(q: string): string {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// -------------------------------------------------------------------------
+// Phase F: composite plan execution.
+//
+// A composite plan is the answer to compound questions like
+// "is payment-service slow because of code or load?" — a single user turn
+// that needs to consult multiple retrieval strategies and reconcile.
+//
+// Execution model:
+//   - Each sub-strategy runs through executePlan() in parallel via
+//     Promise.allSettled — one slow sub-plan can't stall the rest, and one
+//     failing sub-plan can't take down the whole turn.
+//   - Result envelope keeps each sub-plan's own `PlanResult` intact so the
+//     agent can cite per-source rather than seeing a merged blob.
+//   - Sources, notes are merged + deduped for cheap top-level inspection.
+// -------------------------------------------------------------------------
+
+export interface CompositePlanResult {
+  readonly question: string;
+  readonly primaryClass: QuestionClass;
+  readonly secondaryClasses: readonly QuestionClass[];
+  readonly subPlans: readonly { readonly class: QuestionClass; readonly result: PlanResult }[];
+  readonly sources: readonly string[];
+  readonly notes: readonly string[];
+  readonly duration_ms: number;
+}
+
+export async function executeCompositePlan(
+  question: string,
+  primaryClass: QuestionClass,
+  composite: CompositeStrategy,
+  deps: PlanExecutorDeps,
+  opts: ExecuteOptions = {},
+): Promise<CompositePlanResult> {
+  const logger: Logger = createLogger({ service: 'plan-executor.composite' });
+  const start = Date.now();
+
+  logger.info({
+    primary: primaryClass,
+    subCount: composite.subStrategies.length,
+  }, 'Executing composite plan');
+
+  const settled = await Promise.allSettled(
+    composite.subStrategies.map((sub) =>
+      executePlan(question, sub.class, sub.strategy, deps, opts),
+    ),
+  );
+
+  const subPlans: { class: QuestionClass; result: PlanResult }[] = [];
+  const sources = new Set<string>();
+  const notes: string[] = [];
+
+  for (let i = 0; i < settled.length; i += 1) {
+    const sub = composite.subStrategies[i]!;
+    const outcome = settled[i]!;
+    if (outcome.status === 'fulfilled') {
+      const r = outcome.value;
+      subPlans.push({ class: sub.class, result: r });
+      for (const s of r.sources) sources.add(s);
+      for (const n of r.notes) notes.push(`[${sub.class}] ${n}`);
+    } else {
+      // Don't synthesise a fake PlanResult — preserve the failure as a note.
+      notes.push(`[${sub.class}] sub-plan failed: ${errMsg(outcome.reason)}`);
+    }
+  }
+
+  const duration = Date.now() - start;
+  logger.info({
+    primary: primaryClass,
+    subSuccess: subPlans.length,
+    subFail: composite.subStrategies.length - subPlans.length,
+    duration_ms: duration,
+  }, 'Composite plan complete');
+
+  const secondaryClasses = composite.subStrategies
+    .map((s) => s.class)
+    .filter((c) => c !== primaryClass);
+
+  return {
+    question,
+    primaryClass,
+    secondaryClasses,
+    subPlans,
+    sources: [...sources],
+    notes,
+    duration_ms: duration,
+  };
+}
+
+/**
+ * Helper for callers that have a `ClassificationResult` in hand: decides
+ * whether to dispatch a composite or single plan. The threshold is
+ * intentionally conservative — single-class plans are cheaper and easier
+ * to cite, so we only compose when the classifier clearly saw multiple
+ * intents.
+ */
+export function shouldUseCompositePlan(
+  primary: QuestionClass,
+  secondaryClasses: readonly QuestionClass[],
+  confidence: number,
+): boolean {
+  if (secondaryClasses.length === 0) return false;
+  if (primary === 'unknown') return false;
+  // Composite kicks in when the primary is ambiguous (low confidence) OR
+  // when more than one other class lit up — meaning the question genuinely
+  // spans intents.
+  return confidence <= 0.5 || secondaryClasses.length >= 2;
 }
 
 // `PlanResult` fields are readonly for callers; we mutate during construction.

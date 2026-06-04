@@ -12,7 +12,7 @@
  */
 
 import { readFile, readdir } from 'node:fs/promises';
-import { join, basename, extname } from 'node:path';
+import { join, extname } from 'node:path';
 import { createLogger } from '@ekg/shared';
 import type { Logger, ParsedRoute } from '@ekg/shared';
 

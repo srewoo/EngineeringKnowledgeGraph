@@ -19,13 +19,21 @@ import {
   type TableEmbeddable,
   type ApiEmbeddable,
 } from '@ekg/embeddings';
-import { EmbeddingsRepository } from '@ekg/storage';
+import { EmbeddingsRepository, decodeEmbeddingVector } from '@ekg/storage';
+import type { GraphRepository } from '@ekg/graph';
 
 export interface EmbeddingsServiceOptions {
   readonly enabled: boolean;
   readonly dbPath: string;
   /** Override provider (tests). */
   readonly provider?: EmbeddingProvider;
+  /**
+   * Phase D: when supplied AND `EKG_GRAPH_VECTORS=true`, embeddings written
+   * to SQLite are also mirrored as properties on the matching Neo4j nodes
+   * for native vector search. Off by default — adds ~12KB per Function
+   * node at OpenAI dimensions.
+   */
+  readonly graphRepo?: GraphRepository;
 }
 
 export class EmbeddingsService {
@@ -33,6 +41,9 @@ export class EmbeddingsService {
   private readonly repo?: EmbeddingsRepository;
   private readonly providerOverride?: EmbeddingProvider;
   private readonly logger: Logger;
+  private readonly graphRepo?: GraphRepository;
+  /** Cached per-label dims so we only create the vector index once. */
+  private readonly indexedLabels = new Set<string>();
 
   constructor(opts: EmbeddingsServiceOptions) {
     this.enabled = opts.enabled;
@@ -41,6 +52,7 @@ export class EmbeddingsService {
     if (this.enabled) {
       this.repo = new EmbeddingsRepository(opts.dbPath);
     }
+    if (opts.graphRepo) this.graphRepo = opts.graphRepo;
   }
 
   /** Exposed for the MCP search tool. Returns undefined when disabled. */
@@ -83,6 +95,10 @@ export class EmbeddingsService {
       const embedder = new Embedder(provider, this.repo, repoUrl);
       const result = await embedder.embedNodes(inputs);
       this.logger.info({ repoUrl, ...result, total: inputs.length }, 'Embeddings step complete');
+
+      if (this.graphRepo && isGraphVectorMirrorEnabled()) {
+        await this.mirrorVectorsToGraph(repoUrl);
+      }
     } catch (err) {
       this.logger.warn({ repoUrl, err: errorMessage(err) }, 'Embeddings step failed (non-fatal)');
     }
@@ -217,6 +233,62 @@ export class EmbeddingsService {
       responseSchemaKeys: Object.values(parseSchema(props.responseSchemas) ?? {}).flatMap((s) => flattenKeys(s)),
     };
   }
+
+  /**
+   * Phase D: copy vectors written to SQLite into Neo4j as node properties.
+   *
+   * We re-read freshly from SQLite (rather than streaming from the Embedder
+   * directly) for two reasons: (1) it picks up vectors from a prior partial
+   * ingest, so a fault midway is recoverable; (2) it keeps Embedder pure.
+   *
+   * Lazily creates a vector index per-label the first time we write it,
+   * using the dimensionality of the actual stored row.
+   *
+   * Best-effort. Failures here never affect the SQLite path.
+   */
+  private async mirrorVectorsToGraph(repoUrl: string): Promise<void> {
+    if (!this.graphRepo || !this.repo) return;
+    try {
+      // Doc chunks may produce multiple rows per node; keep the first per (label,nodeId).
+      const seen = new Set<string>();
+      const rows: Array<{ nodeId: string; label: string; vector: number[]; provider: string; contentHash: string }> = [];
+      for (const row of this.repo.listByRepo(repoUrl)) {
+        const key = `${row.label}${row.nodeId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const vec = Array.from(decodeEmbeddingVector(row.vector));
+        if (vec.length === 0) continue;
+        rows.push({
+          nodeId: row.nodeId,
+          label: row.label,
+          vector: vec,
+          provider: `${row.provider}:${row.model}`,
+          contentHash: row.contentHash,
+        });
+      }
+      if (rows.length === 0) return;
+      // Ensure vector index per (label, dim) — cheap if already exists.
+      const byLabel = new Map<string, number>();
+      for (const r of rows) {
+        if (!byLabel.has(r.label)) byLabel.set(r.label, r.vector.length);
+      }
+      for (const [label, dim] of byLabel) {
+        const tag = `${label}:${dim}`;
+        if (!this.indexedLabels.has(tag)) {
+          await this.graphRepo.ensureVectorIndex(label, dim);
+          this.indexedLabels.add(tag);
+        }
+      }
+      const written = await this.graphRepo.writeNodeEmbeddings(rows);
+      this.logger.info({ repoUrl, mirrored: written, labels: [...byLabel.keys()] }, 'Vectors mirrored to graph');
+    } catch (err) {
+      this.logger.warn({ repoUrl, err: errorMessage(err) }, 'Vector mirror to graph failed (non-fatal)');
+    }
+  }
+}
+
+function isGraphVectorMirrorEnabled(): boolean {
+  return (process.env['EKG_GRAPH_VECTORS'] ?? '').toLowerCase() === 'true';
 }
 
 async function readBodyLines(absolutePath: string, lineStart: number, lineEnd: number): Promise<string> {

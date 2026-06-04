@@ -11,6 +11,7 @@ export type {
   UsageResult,
   AlarmResult,
   McpAdapter,
+  ServiceDependencyEdge,
 } from './adapter.interface.js';
 
 export { mapServiceName } from './service.mapping.js';

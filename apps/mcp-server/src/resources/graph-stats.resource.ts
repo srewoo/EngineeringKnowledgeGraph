@@ -12,7 +12,7 @@ import type { SqliteRepository } from '@ekg/storage';
 export function registerGraphStatsResource(
   server: McpServer,
   neo4jClient: Neo4jClient,
-  sqliteRepo: SqliteRepository,
+  _sqliteRepo: SqliteRepository,
 ): void {
   const graphRepo = new GraphRepository(neo4jClient);
 

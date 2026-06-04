@@ -15,3 +15,15 @@ export { loadCasesFromFile, parseCases, evalCasesSchema } from './cases.loader.j
 
 export { makeFluencyJudge, readJudgeEnv } from './llm.judge.js';
 export type { JudgeOptions } from './llm.judge.js';
+
+export { compareToBaseline, formatComparison, loadBaseline, saveBaseline } from './baseline.js';
+export type { BaselineThresholds, BaselineComparison, MetricDelta } from './baseline.js';
+
+export { FixtureGraph } from './fixtures.js';
+export type { FixtureNode, FixtureEdge, GraphFixture } from './fixtures.js';
+export { FixtureAgent } from './fixture.agent.js';
+
+export { evaluateGate, formatGate, DEFAULT_FLOORS } from './gate.js';
+export type { GateFloors, GateResult, EvaluateGateOptions } from './gate.js';
+
+export { loadLabels, renderCalibrationReport } from './calibration.report.js';

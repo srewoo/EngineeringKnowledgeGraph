@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EmbeddingsRepository } from '../../src/embeddings.repository.js';
+import { EmbeddingsRepository, decodeEmbeddingVector } from '../../src/embeddings.repository.js';
 
 function vec(values: readonly number[]): Buffer {
   const arr = new Float32Array(values);
@@ -143,5 +143,30 @@ describe('EmbeddingsRepository', () => {
     ]);
     const hits = repo.searchSimilar(asF32([1, 0]), {});
     expect(hits).toHaveLength(0);
+  });
+
+  // ---- Phase D additions ----
+  describe('Phase D: listByRepo + decodeEmbeddingVector', () => {
+    it('listByRepo returns all rows for a repo, optionally filtered by label', () => {
+      const now = new Date().toISOString();
+      repo.upsert([
+        { id: 'F1', label: 'Function', nodeId: 'fn:1', repoUrl: 'r1', contentHash: 'h1', provider: 'p', model: 'm', dimensions: 3, vector: vec([1, 0, 0]), textUsed: 't', createdAt: now },
+        { id: 'F2', label: 'Function', nodeId: 'fn:2', repoUrl: 'r1', contentHash: 'h2', provider: 'p', model: 'm', dimensions: 3, vector: vec([0, 1, 0]), textUsed: 't', createdAt: now },
+        { id: 'D1', label: 'Doc',      nodeId: 'doc:1', repoUrl: 'r1', contentHash: 'h3', provider: 'p', model: 'm', dimensions: 3, vector: vec([0, 0, 1]), textUsed: 't', createdAt: now },
+        { id: 'X',  label: 'Function', nodeId: 'fn:x',  repoUrl: 'r2', contentHash: 'h4', provider: 'p', model: 'm', dimensions: 3, vector: vec([1, 1, 1]), textUsed: 't', createdAt: now },
+      ]);
+      const all = repo.listByRepo('r1');
+      expect(all).toHaveLength(3);
+      const fns = repo.listByRepo('r1', 'Function');
+      expect(fns.map((r) => r.nodeId).sort()).toEqual(['fn:1', 'fn:2']);
+      const other = repo.listByRepo('does-not-exist');
+      expect(other).toHaveLength(0);
+    });
+
+    it('decodeEmbeddingVector round-trips through the stored buffer', () => {
+      const original = [0.25, -0.5, 0.75];
+      const f32 = decodeEmbeddingVector(vec(original));
+      expect(Array.from(f32)).toEqual(original);
+    });
   });
 });

@@ -113,6 +113,86 @@ const TEMPLATES: Readonly<Record<CypherTemplateKey, CypherTemplate>> = Object.fr
       LIMIT 25
     `.trim(),
   },
+  runtime: {
+    // Phase C — OBSERVED_CALL edges materialised by RuntimeEdgesPass.
+    // Returns inbound + outbound observed callers for a service, plus the
+    // most recently-seen call window.
+    key: 'runtime',
+    description: 'Observed service-to-service calls from runtime adapters (Datadog APM, etc).',
+    cypher: `
+      MATCH (s:Service)
+      WHERE toLower(s.name) IN $serviceNames
+      OPTIONAL MATCH (s)-[r_out:OBSERVED_CALL]->(callee:Service)
+      OPTIONAL MATCH (caller:Service)-[r_in:OBSERVED_CALL]->(s)
+      RETURN s.name AS service,
+             collect(DISTINCT {
+               callee: callee.name,
+               source: r_out.source,
+               lastSeenAt: r_out.lastSeenAt,
+               callCount: r_out.callCount,
+               errorCount: r_out.errorCount
+             }) AS observedOut,
+             collect(DISTINCT {
+               caller: caller.name,
+               source: r_in.source,
+               lastSeenAt: r_in.lastSeenAt,
+               callCount: r_in.callCount,
+               errorCount: r_in.errorCount
+             }) AS observedIn
+      LIMIT 25
+    `.trim(),
+  },
+  coverage: {
+    // Phase E — TestCase / TESTS edges. Resolves an entity (file path
+    // substring or service name) to either:
+    //   - tests covering it, or
+    //   - files inside it with no TESTS coverage
+    key: 'coverage',
+    description: 'Test coverage: which TestCase nodes cover which files inside a service.',
+    cypher: `
+      OPTIONAL MATCH (svc:Service)
+        WHERE toLower(svc.name) IN $serviceNames
+      OPTIONAL MATCH (svc)-[:CONTAINS*1..3]->(svcFile:File)
+      WITH svc, collect(DISTINCT svcFile) AS svcFiles
+      OPTIONAL MATCH (f:File)
+        WHERE $entity <> '' AND toLower(f.path) CONTAINS toLower($entity)
+      WITH svc, svcFiles + collect(DISTINCT f) AS allFiles
+      UNWIND allFiles AS target
+      WITH DISTINCT target WHERE target IS NOT NULL
+      OPTIONAL MATCH (t:TestCase)-[:TESTS]->(target)
+      WITH target, collect(DISTINCT { id: t.id, testFile: t.testFile, framework: t.framework }) AS tests
+      RETURN target.path AS file,
+             [x IN tests WHERE x.id IS NOT NULL] AS tests
+      ORDER BY size(tests) ASC, file
+      LIMIT 50
+    `.trim(),
+  },
+  mrs: {
+    // Phase B — MR nodes persisted via gitlab_get_mr persist=true.
+    // Resolves to all MRs for a given projectPath (the gitlab namespace/project).
+    key: 'mrs',
+    description: 'Merge requests persisted in the graph for a project or author.',
+    cypher: `
+      MATCH (mr:MR)
+      WHERE ($entity <> '' AND (toLower(mr.projectPath) CONTAINS toLower($entity)
+                                OR toLower(mr.author) = toLower($entity)
+                                OR toLower(mr.title)  CONTAINS toLower($entity)))
+         OR (size($serviceNames) > 0 AND toLower(mr.projectPath) IN $serviceNames)
+      OPTIONAL MATCH (o:Owner)-[:AUTHORED_MR]->(mr)
+      RETURN mr.iid AS iid,
+             mr.projectPath AS projectPath,
+             mr.title AS title,
+             mr.state AS state,
+             mr.author AS author,
+             mr.webUrl AS webUrl,
+             mr.updatedAt AS updatedAt,
+             mr.filesChanged AS filesChanged,
+             mr.diffSize AS diffSize,
+             o.identifier AS authorOwner
+      ORDER BY mr.updatedAt DESC
+      LIMIT 25
+    `.trim(),
+  },
   commits: {
     // Phase 1.7 — `Commit -[TOUCHED]-> File` edges populated when
     // EKG_GIT_HISTORY_ENABLED=true. Resolves an entity (file path or service

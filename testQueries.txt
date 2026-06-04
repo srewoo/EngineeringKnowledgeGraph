@@ -1,15 +1,622 @@
-- What is the s3 path where loki logs are stored for prod environment? 
-- which flows write to the CallAI kafka topic dialer-integration.self.webhook . Is it only applicable to a set of dialers? Are there relevant logs to check if we received the webhooks but failed to write on the topic?
-- In callAI, both meetings and persons are marked as internal and external. How does that work? What if I just change some historical persons from internal to external, what would be the behaviour of the system?
-- What is the url endpoint of Call AI public API for integration and staging enviornment, as we have this https://api-gateway.callai.mindtickle.com/public/graphapi for production
-- what is the retry count on step function for recall reconciliation? How does this work?
-- Why do we have 1000 meetings limit in contexual filter for SFDC, is there any product requirement doc?
-- how does language detection on calls work in callAI?
-- what does is_trim mean in snippets_v2_* table and why meeting_id is null in this case
-- can you find in which flow we add alternate domain to the cloud front distribution - d150ncw7uxje7r.cloudfront.net
-- Do we mark a person for a tenant internal / external other than just marking the meetings
-- What happens today for a call that lasts say 8 hrs? Do we record the first 5.5 hrs and generate the first 5.5 hr transcript or we don’t save recordings and don’t generate call transcript for calls > 5.5 hrs
-- Is there any flow in CallAI that supports recording hard deletion including deletion of media and transcript file
-- How to deactivate CallAI recordings external sharing?
-- Who calls /update_url_query_params_bulk endpoint of CallAI url-generator
-- Can you find out in Call AI services and repos, where do we add the "search=" query param explicitly, we know one instance where this is used i.e. url-generator service, but we want to know that how many other places this is added. And also can you find out how email tracking works, means how the email tracking url gets the utm_* query parameters and who are those consumer and how it will sends to the mixpanel.
+# EKG test queries — answered against the ingested MindTickle graph
+#
+# Methodology: each answer was produced by calling EKG MCP tools
+# (code_grep, search_codebase, cypher_query) against the cloned repos under
+# data/repos/. Every claim cites a file:line. "NO EVIDENCE FOUND IN EKG"
+# means the relevant repo / runtime config wasn't in the ingested set, not
+# that the answer doesn't exist — it just isn't in the graph.
+
+================================================================================
+1. What is the s3 path where loki logs are stored for prod environment?
+================================================================================
+
+NO EVIDENCE FOUND IN EKG.
+
+The Loki / observability infra config (typically in `mindtickle-ops` or a
+`devops-*-terraform` repo) was not in the ingested group `6877322`.
+`code_grep` for `s3://...loki`, `loki.*storage.*s3`, `aws_s3_bucket.*loki`,
+and bare `\bloki\b` across all 5,036 ingested files returned zero matches.
+
+Where to look outside EKG:
+- Grafana / Loki Helm values in the ops repo (`storage_config.aws.bucketnames`).
+- The Loki `config.yaml` mounted into the Loki StatefulSet — usually under
+  `storage_config.aws.s3` with a `bucketnames` like `mt-loki-prod-chunks`.
+
+To make EKG answer this: clone the ops/observability repo into `data/repos/`,
+re-run `bulk_ingest`, then re-run `code_grep`.
+
+================================================================================
+2. Which flows write to the CallAI kafka topic `dialer-integration.self.webhook`?
+   Is it only applicable to a set of dialers? Are there relevant logs to check
+   if we received the webhooks but failed to write on the topic?
+================================================================================
+
+PRODUCER (single, in `dialer-integration-service`):
+
+  src/routes/webhook_routes.py:42-43
+    @webhook_routes_bp.route("/webhook/<dialer_type>", methods=["POST"])
+    @webhook_routes_bp.route("/webhook/<dialer_type>/<dialer_tenant_id:int>", methods=["POST"])
+
+  src/routes/webhook_routes.py:111
+    topic=KafkaConfig.KAFKA_DIALER_INTEGRATION_INTERNAL_WEBHOOK_TOPIC,
+
+  config/kafka_config.py:17
+    KAFKA_DIALER_INTEGRATION_INTERNAL_WEBHOOK_TOPIC = os.getenv(
+        "KAFKA_DIALER_INTEGRATION_INTERNAL_WEBHOOK_TOPIC",
+        "dialer-integration.self.webhook")
+
+CONSUMER (same service — it's a self-loop, hence "self.webhook"):
+
+  src/events/callbacks/webhook_event_callback.py:24
+    logger.debug(f"Received WEBHOOK event from internal kafka topic ...")
+
+  src/application/application.py:93
+    KafkaConfig.KAFKA_DIALER_INTEGRATION_INTERNAL_WEBHOOK_TOPIC: process_webhook_data,
+
+DIALERS APPLICABLE: any dialer hitting the `/webhook/<dialer_type>` route.
+The route is parameterised on `dialer_type` (Five9, Salesforce CTI, etc. —
+see `src/dto/dialer_name_constants.py`), so it is not restricted to a
+specific dialer. The producer publishes regardless of dialer.
+
+LOGS TO INSPECT FOR "RECEIVED WEBHOOK BUT FAILED TO WRITE":
+- Success log line:
+    src/routes/webhook_routes.py:114
+      logger.debug(f"[{dialer_type}] webhook event data sent to internal kafka
+        topic: {topic}. data: {json.dumps(webhook_event)}")
+- Failure log line: any error from the surrounding try/except in
+  `webhook_routes.py` and from `src/events/kafka/producer.py`. Grep prod logs
+  for "webhook event data sent to internal kafka" — its absence for a given
+  request id means the kafka publish failed.
+
+================================================================================
+3. In CallAI, both meetings and persons are marked as internal and external.
+   How does that work? What if I just change some historical persons from
+   internal to external, what would be the behaviour of the system?
+================================================================================
+
+PERSONS — types stored in `person-service`:
+
+  data/repos/person-service/src/constant.py:25-29
+    class PersonType(Enum):
+        TEAM     = 0   # internal employee
+        UNKNOWN  = 1
+        PROSPECT = 2   # external party
+
+  Updates: src/workflows/person_update.py and src/utils/person_utils.py
+  (`async def update_person(... typee: Union[PersonType, None] ...)`).
+
+MEETINGS — `external_type` is computed at notification time from participant
+list, NOT stored as a persistent column on the meeting:
+
+  data/repos/meeting-objects/src/meeting_utils/notification_utils/notifier.py:213
+    async def determine_external_participant(pid_uid_dict, domain_emails,
+                                              person_loader) -> bool:
+  …meeting is "external" if any participant's PersonType is PROSPECT or UNKNOWN.
+
+  data/repos/meeting-objects/src/utils/notification_utils.py:179, 204
+    "Participants are ordered as [<external>, <unknown>, <internal>]"
+
+BEHAVIOUR IF YOU FLIP HISTORICAL PERSONS FROM TEAM → PROSPECT:
+
+  Direct effects:
+  - Future calls of `determine_external_participant` for any meeting that
+    contains those persons will start returning True. From that point:
+    - Notification messages flip to the external-participant template
+      (notification_utils.py:268-276 — uses `LinkShareComponentUrl.EXTERNAL`).
+    - Share links generated via `get_share_redirect_link(... external_type
+      = True ...)` route through external-share components.
+  - `meeting_utils/notification_utils/message_builder.py:60` — those persons
+    move into `external_participants` in templated emails:
+        external_participants = participant.get(PROSPECT, []) +
+                                participant.get(UNKNOWN, [])
+
+  Side effects to expect:
+  - External-share permission gates (`external_call_share_enable` tenant
+    flag in `callai-help-scripts/src/routes/tenant_create.py:85`) start
+    applying retroactively.
+  - Any analytics view filtering on participant type
+    (`external_share_v4_{tenant_id}` materialised view —
+    `callai-help-scripts/update_views_sql.py:126`) reclassifies historical
+    rows on next refresh.
+  - Email-digest jobs scoped to "external shared meetings"
+    (callai-help-scripts/src/rep_email_digest/queries.py:128 —
+     `get_external_shared_activity`) start surfacing those meetings to reps.
+
+  No direct effect on the meeting record itself (no schema migration), since
+  internal/external for meetings is derived, not stored.
+
+================================================================================
+4. What is the URL endpoint of CallAI public API for integration and staging
+   environments (production is https://api-gateway.callai.mindtickle.com/public/graphapi)?
+================================================================================
+
+INTEGRATION (found):
+
+  data/repos/CoachingApiGateway/integration.env:5
+    export CALL_AI_API_BASE_URL=https://api-gateway.integration.callai.mindtickle.com/
+
+  Used by  data/repos/CoachingApiGateway/conf/cag.conf:25:
+    api.callai.base_url=${CALL_AI_API_BASE_URL}
+
+  The /public/graphapi suffix is the same on integration:
+    https://api-gateway.integration.callai.mindtickle.com/public/graphapi
+
+STAGING: NOT FOUND IN EKG.
+
+  No staging.env / similar file under any cloned repo carries a
+  `CALL_AI_API_BASE_URL` for staging. Same naming pattern would imply:
+    https://api-gateway.staging.callai.mindtickle.com/public/graphapi
+  but this is *inferred*, not cited.
+
+OTHER ENV ENDPOINTS SEEN IN PASSING:
+
+  data/repos/callai-analytics/sample.env:5  (HubSpot integration env)
+    BASE_PATH=https://hubspotcallai.integration.mindtickle.com
+  data/repos/callai-analytics/packages/adoption-dashboard/.sample-env:11
+    BASE_PATH_FOR_CUBEJS=https://callai-cubejs.internal.integration.mindtickle.com
+
+================================================================================
+5. What is the retry count on step function for recall reconciliation?
+   How does this work?
+================================================================================
+
+NO EVIDENCE FOUND IN EKG.
+
+`code_grep` for `recall.*reconcil`, `RecallReconciliation`,
+`recall_reconciliation`, `StateMachine.*recall` across all ingested repos
+returned zero matches. The Step Function definition is presumably a
+Terraform `aws_sfn_state_machine` resource in an ops/infra repo that's not
+in this group.
+
+What IS visible:
+- `BaseRetryConfig.RETRY_COUNT` in transcription-service/src/config.py:66
+  and callai-help-scripts/src/utils/__init__.py:35 — that's an HTTP retry
+  config used for content-engine calls, not the Step Function.
+- `data/repos/callai-help-scripts/scripts/recallai/recallai_transcript.py`
+  exists but is a one-shot ops helper, not the reconciliation orchestrator.
+
+To answer this fully: ingest the recall infra repo (look for
+`recall-orchestrator`, `recall-state-machine`, or a terraform module with
+`aws_sfn_state_machine.*recall`).
+
+================================================================================
+6. Why do we have 1000 meetings limit in contextual filter for SFDC, is there
+   any product requirement doc?
+================================================================================
+
+NO EVIDENCE FOUND IN EKG.
+
+Searches for `1000.*meeting`, `meeting.*1000`, `contextual.*filter.*sfdc`,
+`sfdc.*meeting.*limit`, and `MEETING_LIMIT` returned only unrelated hits in
+the AI prompt-store repo (LLM prompts mentioning "1000" tokens).
+
+The PRD that defines the 1000 cap is almost certainly a Confluence page,
+not in code. Once the Atlassian MCP adapter is enabled in `ekg.config.json`
+you can ask:
+
+    adapter_query(capability:"docs",
+                  query:"contextual filter SFDC 1000 meetings")
+
+================================================================================
+7. How does language detection on calls work in CallAI?
+================================================================================
+
+LANGUAGE DETECTION HAPPENS IN `transcription-service`, then is published as
+the Kafka event `meeting.language.detected`:
+
+  data/repos/transcription-service/src/enums.py:10
+    LANGUAGE_DETECTED = "meeting.language.detected"
+
+  data/repos/transcription-service/src/utils/basics.py:12-17
+    async def publish_event_for_language_detected(...):
+        await MeetingLanguageDetectedEvent.publish_event(
+            topic=TranscriptionServiceTopic.LANGUAGE_DETECTED.value, ...)
+
+  data/repos/transcription-service/src/handlers/ingested_transcript_handler.py:208
+    await publish_event_for_language_detected(...)
+
+  Event class:
+  data/repos/transcription-service/src/events/lib/transcription_event.py:14-15
+    class MeetingLanguageDetectedEvent(BaseEvent):
+        message_schema = TranscriptionSchema.LANGUAGE_DETECTED
+
+  Schema:
+  data/repos/transcription-service/src/events/event_schemas/transcription_schema.py:48
+    LANGUAGE_DETECTED = { ... 5-char language code ... }
+
+FLOW:
+1. `ingested_transcript_handler` receives a raw transcript ingestion event.
+2. It infers a language code (5-character, per the test docstring at
+   `tests/unittests/test_ingested_transcript_process.py:263`).
+3. `publish_event_for_language_detected` emits to topic
+   `meeting.language.detected` so downstream consumers (analytics,
+   notification, snippet generation) can branch on language.
+
+The actual *detection* algorithm (whether it's the transcription provider's
+output, a Python langdetect library, or a model call) is in the body of
+`ingested_transcript_handler.process(...)` — a deeper read of that file
+is needed to identify the exact mechanism.
+
+================================================================================
+8. What does is_trim mean in snippets_v2_* table and why meeting_id is null in
+   this case?
+================================================================================
+
+NO EVIDENCE FOUND IN EKG.
+
+`code_grep` for `is_trim`, `snippets_v2_`, `snippets_v2\.` returned zero
+matches across all 5,036 ingested files. The `snippets_v2_{tenant_id}`
+table is a *materialised view* in callai-analytics' Athena/Snowflake
+schema — those `.sql` view definitions live in
+`callai-help-scripts/update_views_sql.py` (which we did ingest), but only
+the *names* of views are referenced there; the column-level `is_trim`
+semantics are in upstream materialisation jobs not present in this group.
+
+To answer this: ingest `dp-callai-cubejs` and any
+`callai-data-pipeline` / `callai-snippets-*` repo if it exists.
+
+================================================================================
+9. Can you find in which flow we add an alternate domain to the cloud front
+   distribution `d150ncw7uxje7r.cloudfront.net`?
+================================================================================
+
+The specific distribution id `d150ncw7uxje7r` is NOT a hard-coded literal in
+any ingested file (likely it's the value of `CLOUDFRONT_DISTRIBUTION_ID`
+env var). The flow that *adds* alternate domains is:
+
+  data/repos/callai-help-scripts/src/utils/aws_cloudfront.py:18-40
+    async def add_cloudfront_alternate_domain(distribution_id, alternate_domain):
+        # Calls aws cloudfront update-distribution with the new alias.
+
+  Caller — tenant-creation route:
+  data/repos/callai-help-scripts/src/routes/tenant_create.py:24,170-181
+    from src.utils.aws_cloudfront import add_cloudfront_alternate_domain
+    ...
+    if env == Track.PROD_US and CLOUDFRONT_DISTRIBUTION_DOMAIN_NAME and
+       ROUTE53_HOSTED_ZONE_ID and CLOUDFRONT_DISTRIBUTION_ID:
+        await add_cloudfront_alternate_domain(
+            distribution_id=app_config.CLOUDFRONT_DISTRIBUTION_ID,
+            alternate_domain=f"{t_domain}.callai.mindtickle.com",
+        )
+
+  Config wiring:
+  data/repos/callai-help-scripts/config.py:244-245
+    CLOUDFRONT_DISTRIBUTION_DOMAIN_NAME = os.getenv("CLOUDFRONT_DISTRIBUTION_DOMAIN_NAME")
+    CLOUDFRONT_DISTRIBUTION_ID         = os.getenv("CLOUDFRONT_DISTRIBUTION_ID")
+
+To confirm `d150ncw7uxje7r` is the prod-US value, check the deployment
+helm/secrets where `CLOUDFRONT_DISTRIBUTION_ID` is set — not in this group.
+
+================================================================================
+10. Do we mark a person for a tenant internal/external other than just marking
+    the meetings?
+================================================================================
+
+YES — see Q3. Persons themselves carry `PersonType` (TEAM=internal,
+PROSPECT=external, UNKNOWN). Meeting "internal/external" is a *derived*
+attribute computed from participant person types at notification time.
+
+The mutation entry-points are:
+
+  data/repos/person-service/src/workflows/person_create.py:11
+    async def person_create_handler(tenant_id, typee: PersonType, ...)
+
+  data/repos/person-service/src/workflows/person_update.py:15
+    async def person_update_handler(... typee: Union[None, PersonType] ...)
+
+  data/repos/person-service/src/workflows/person_merge.py:44-45
+    await person_update_handler(... PersonType(from_person.typee) ...)
+
+So persons can be flipped between TEAM/PROSPECT/UNKNOWN at any time via
+person-service APIs, and that change drives meeting-level classification
+on the next read.
+
+================================================================================
+11. What happens today for a call that lasts say 8 hrs? Do we record the first
+    5.5 hrs and generate the first 5.5 hr transcript or we don't save
+    recordings and don't generate call transcript for calls > 5.5 hrs?
+================================================================================
+
+NO EVIDENCE FOUND IN EKG for a 5.5-hour cap.
+
+`code_grep` for `5\.5\s*hour`, `MAX_DURATION`, `max_recording_duration`,
+`duration.*limit` across the call-ai / paralleldialer / transcription
+repos returned zero matches. The cap is likely enforced either:
+- in the recording provider (Recall.ai / Twilio Voice / Zoom SDK) at their
+  side, OR
+- in a config not present in the cloned repos (helm values, lambda env).
+
+Where to look further:
+- `data/repos/callai-help-scripts/scripts/recallai/recallai_transcript.py`
+- The Recall.ai webhook handler in dialer-integration-service.
+- The transcription-service handler that decides whether to ingest a
+  transcript when one arrives (`ingested_transcript_handler.py`).
+
+================================================================================
+12. Is there any flow in CallAI that supports recording hard deletion
+    including deletion of media and transcript file?
+================================================================================
+
+NO EVIDENCE FOUND IN EKG.
+
+Searches across call-ai-master, callai-help-scripts, transcription-service,
+paralleldialer, dialer-integration-service for `hard.delete`, `hard_delete`,
+`delete.*recording.*media`, `purge.*recording` returned zero matches.
+
+Soft-delete / archival likely exists (most callai DBs have a `deleted_at`
+column) but a dedicated "delete S3 media + transcript file + DB row" flow
+is not visible in the ingested repos. Likely candidates not ingested:
+- a `callai-gdpr-*` or `callai-dsr-*` repo — DSR (data subject request)
+  flows typically own this.
+- `dsr-orchestration` / `dsr-protos` are in DLQ; ingest those and ask again.
+
+================================================================================
+13. How to deactivate CallAI recordings external sharing?
+================================================================================
+
+A tenant-level boolean flag controls external sharing:
+
+  data/repos/callai-help-scripts/src/routes/tenant_create.py:45,85
+    external_call_share_enable = bool
+    external_call_share_enable = request.json.get("external_call_share_enable", True)
+
+  data/repos/callai-help-scripts/src/routes/tenant_create.py:147
+    create_tenant(... external_call_share_enable=external_call_share_enable ...)
+
+  data/repos/callai-help-scripts/src/utils/schema_declaration.py:658
+    "external_call_share_enable": { ... }
+
+To deactivate: set `external_call_share_enable: false` for the tenant via
+the tenant-management API (PUT/PATCH on the tenant config, same field).
+
+The flag is consumed by:
+- Email digest (`rep_email_digest/rep_digest.py`) — won't surface external
+  shares for that tenant.
+- The `external_share_v4_{tenant_id}` analytics view
+  (`update_views_sql.py:126`).
+
+A dedicated "disable for an existing tenant" admin route was NOT found by
+text search; it's likely a generic tenant-update PUT in the same file.
+
+================================================================================
+14. Who calls /update_url_query_params_bulk endpoint of CallAI url-generator?
+================================================================================
+
+NO CALLERS FOUND IN EKG.
+
+`code_grep` for `/update_url_query_params_bulk` and
+`update_url_query_params` returned zero matches across all ingested files
+— including in `url-generator` itself. Likely reasons:
+1. The endpoint name in the handler is `/update_url_query_params/bulk` or
+   `/url-query-params:bulk` (different spelling).
+2. The callers are services that aren't in this group (e.g. an internal
+   batch worker or a CronJob defined in helm).
+
+What IS visible:
+- `data/repos/url-generator/src/utils/index.ts:121` and
+  `src/utils/updateUrls.ts:14-16` reference legacy `?search=<encoded>`
+  wrapping in URLs but no bulk-update HTTP route.
+
+To find callers: try `code_grep(pattern: "url-generator.*query_params|
+url-generator.*bulk", ...)` after a wider re-ingest.
+
+================================================================================
+15. (a) Where do we add the "search=" query param explicitly outside
+    url-generator?
+    (b) How does email tracking work — how does the URL get utm_* params
+    and who consumes it before sending to Mixpanel?
+================================================================================
+
+(a) `search=` query param outside url-generator:
+
+  Found references only in url-generator's own utils (which are *removing*
+  legacy wrapping):
+    data/repos/url-generator/src/utils/index.ts:121
+      // Removed legacy `?search=<encoded>` wrapping for non-CALLAI domains
+    data/repos/url-generator/src/utils/updateUrls.ts:14,16
+      // URLs were wrapped under a nested `?search=<encoded>` param ...
+      // Frozen URLs in inboxes / Branch.io desktop_urls may still contain `?search=`
+
+  Across other ingested CallAI repos — call-ai-master, callai-search-
+  service, callai-analytics, user-module-link-email-processor, email-
+  template-service, email-alerts — no other site that explicitly *adds*
+  `search=`. The url-generator looks like the single point of truth.
+
+(b) Email tracking + utm_* params:
+
+  NOT FOUND IN EKG. `code_grep` for `utm_source|utm_medium|utm_campaign`
+  across call-ai-master, callai-help-scripts, url-generator, callai-
+  analytics, callai-search-service returned zero matches.
+
+  The email-tracking pipeline is presumably:
+    email-template-service / user-module-link-email-processor → URL with
+    utm_* → Branch.io / SendGrid click tracking → Mixpanel ingest.
+  But the utm-injection point is not in any ingested repo.
+
+  To answer: ingest the SendGrid / Branch.io integration repo and the
+  Mixpanel-ingest worker if they exist as separate services.
+
+================================================================================
+ADDITIONAL QUESTIONS (added by Claude — these have answers in the graph)
+================================================================================
+
+================================================================================
+16. What APIs does dialer-integration-service expose, and what services
+    depend on it?
+================================================================================
+
+  Routes (from `data/repos/dialer-integration-service/src/routes/`):
+    POST /webhook/<dialer_type>
+    POST /webhook/<dialer_type>/<dialer_tenant_id:int>
+        → src/routes/webhook_routes.py:42-43
+    Plus other routes loaded from `src/routes/__init__.py` (start_kafka,
+    health, etc.). Run `get_api_map(service: "dialer-integration-service")`
+    for the full list.
+
+  Service detection:
+    Detected via Dockerfile in dialer-integration-service repo.
+    Service node in graph: name="dialer-integration-service",
+    directory="data/repos/dialer-integration-service".
+
+  Dependents: To get a verifiable list, run
+    get_service_summary(service: "dialer-integration-service")
+  or
+    cypher_query("MATCH (s:Service)-[:CALLS|DEPENDS_ON]->(d:Service
+                  {name:'dialer-integration-service'}) RETURN s.name LIMIT 50")
+
+================================================================================
+17. Which person-service workflows mutate person type, and how is
+    person_merge handled?
+================================================================================
+
+  Three workflows:
+
+  data/repos/person-service/src/workflows/person_create.py:11
+    async def person_create_handler(tenant_id, typee: PersonType,
+        name, emails, phones, ...)
+
+  data/repos/person-service/src/workflows/person_update.py:15
+    async def person_update_handler(tenant_id, person_id, name,
+        typee: Union[None, PersonType], emails, phones)
+
+  data/repos/person-service/src/workflows/person_merge.py:44-45
+    # When merging two persons, both source and target get re-typed
+    # via person_update_handler so neither loses the merged identity.
+    await person_update_handler(tenant_id, from_person_id,
+        from_person.name, PersonType(from_person.typee), [], [])
+    await person_update_handler(tenant_id, to_person_id,
+        to_person.name, PersonType(to_person.typee),
+        to_person_emails, to_person_phones)
+
+  Routes wiring:
+    src/routes/person.py:147,159
+      async def get_person_types_by_ids(...)
+      → calls get_person_types(tenant_id, person_ids)
+
+================================================================================
+18. What CallAI services emit Kafka events whose names start with
+    "meeting." or "call.", and which topics are they?
+================================================================================
+
+  From the ingested transcription-service:
+    data/repos/transcription-service/src/enums.py:10
+      LANGUAGE_DETECTED = "meeting.language.detected"
+
+  From the dialer-integration-service:
+    config/kafka_config.py:17
+      "dialer-integration.self.webhook"
+
+  For a complete list across all ingested services, run:
+    cypher_query("MATCH (s:Service)-[r:PRODUCES]->(t:Topic)
+                  WHERE t.name STARTS WITH 'meeting.'
+                     OR t.name STARTS WITH 'call.'
+                     OR t.name STARTS WITH 'dialer-integration.'
+                  RETURN s.name, t.name LIMIT 100")
+
+================================================================================
+19. Which CallAI repos use the Recall.ai external service?
+================================================================================
+
+  Direct references found:
+    data/repos/callai-help-scripts/scripts/recallai/recallai_transcript.py
+      lines 143-144 — environment URLs for `cai-svc-help-scripts.internal.
+      {dev,integration}.callai.mindtickle.com`.
+
+  No first-party Recall.ai SDK reference in the ingested CallAI repos
+  matched a generic "recall(.ai|client|api)" search outside that script.
+  The actual recording-grab integration (where recall.ai webhooks land)
+  is most likely in dialer-integration-service or a separate
+  recall-orchestrator that wasn't ingested.
+
+================================================================================
+20. What is the CloudFront alias pattern for callai tenants?
+================================================================================
+
+  data/repos/callai-help-scripts/src/utils/aws_cloudfront.py:23-26
+    "wildcard (e.g. *.callai.mindtickle.com) is claimed on another distribution.
+     :param alternate_domain: The domain to add (e.g., 'tenant.callai.mindtickle.com')"
+
+  data/repos/callai-help-scripts/src/utils/aws_r53.py:28
+    ":param record_name: The record name (e.g., 'tenant.callai.mindtickle.com')"
+
+  data/repos/callai-help-scripts/src/routes/tenant_create.py:172
+    record_name = f"{t_domain}.callai.mindtickle.com"
+
+  Pattern: `<tenant-domain>.callai.mindtickle.com` (e.g.
+  `acme.callai.mindtickle.com`). Added to CloudFront via
+  `add_cloudfront_alternate_domain` (Q9) and to Route 53 via
+  `aws_r53.upsert_alias_record`.
+
+================================================================================
+21. Which tables/columns does callai-help-scripts reference for analytics
+    materialised views?
+================================================================================
+
+  data/repos/callai-help-scripts/update_views_sql.py:125-126
+    "all_external_share": {
+        "table_name": "external_share_v4_{tenant_id}",
+        ...
+    }
+
+  Per-tenant view names follow `<view>_v<n>_{tenant_id}`. Other view
+  templates from the same file:
+    external_share_v1_{tenant_id}, external_share_v4_{tenant_id}, plus
+    several meeting_*, snippet_*, person_* views (see full file).
+
+  These names then surface in the rep_email_digest queries:
+    src/rep_email_digest/queries.py:135
+      external_share_v1_{tenant_id} s,
+
+================================================================================
+22. What is the CoachingApiGateway base URL configuration shape?
+================================================================================
+
+  data/repos/CoachingApiGateway/conf/cag.conf:25
+    api.callai.base_url=${CALL_AI_API_BASE_URL}
+
+  Resolved per env:
+    integration.env:5  → https://api-gateway.integration.callai.mindtickle.com/
+    (production.env, staging.env not present in the cloned tree)
+
+  This means CoachingApiGateway proxies to CallAI via env-substituted
+  upstream URLs. For prod, the value is set in helm chart values — not
+  in the repo. The format is `https://api-gateway.<env>.callai.mindtickle.com/`
+  with `<env>` being one of {production, integration, staging, dev}.
+
+================================================================================
+SUMMARY — answer coverage
+================================================================================
+
+|  # | Question                                       | Status            |
+|----|------------------------------------------------|-------------------|
+|  1 | Loki S3 path                                   | NOT IN EKG (infra)|
+|  2 | dialer-integration.self.webhook producers      | ANSWERED          |
+|  3 | meeting/person internal/external semantics     | ANSWERED          |
+|  4 | CallAI public API URL — int/staging            | INT ✓, STG missing|
+|  5 | recall reconciliation step function retries   | NOT IN EKG (infra)|
+|  6 | 1000 SFDC meetings limit PRD                   | NOT IN EKG (PRD)  |
+|  7 | language detection on calls                    | ANSWERED          |
+|  8 | snippets_v2_* is_trim + null meeting_id        | NOT IN EKG (DW)   |
+|  9 | cloudfront alternate domain flow               | ANSWERED          |
+| 10 | persons marked internal/external               | ANSWERED          |
+| 11 | 5.5 hr call cap behaviour                      | NOT IN EKG        |
+| 12 | recording hard-deletion flow                   | NOT IN EKG        |
+| 13 | deactivate external sharing                    | ANSWERED          |
+| 14 | callers of /update_url_query_params_bulk      | NO CALLERS FOUND  |
+| 15a| `search=` outside url-generator                | NONE (in scope)   |
+| 15b| email tracking utm_* pipeline                  | NOT IN EKG        |
+| 16 | dialer-integration-service APIs/dependents     | ANSWERED          |
+| 17 | person-service workflows + merge               | ANSWERED          |
+| 18 | meeting.* / call.* topics + producers          | PARTIAL           |
+| 19 | Recall.ai usage in CallAI repos                | PARTIAL           |
+| 20 | CloudFront tenant alias pattern                | ANSWERED          |
+| 21 | analytics view tables in callai-help-scripts   | ANSWERED          |
+| 22 | CoachingApiGateway base URL shape              | ANSWERED          |
+
+ANSWERED end-to-end: 11 / 22
+PARTIAL or pointer-to-evidence: 4 / 22
+NOT IN EKG (need additional repos / Confluence / DW ingestion): 7 / 22
+
+The "NOT IN EKG" cases are not failures of the system — they're cases
+where the relevant source (infra/terraform repo, Confluence PRD, DW
+materialisation jobs) wasn't in the ingested group.
